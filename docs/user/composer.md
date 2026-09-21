@@ -48,8 +48,14 @@ requires an active turn that supports steering. Change
 `thread.steerQueuedMessage` in **Settings → Keybindings** to use another shortcut.
 
 Press `Option+Up` on macOS or `Alt+Up` on Windows and Linux with the cursor at the
-start of the composer to edit the most recently queued message. Change
-`thread.editQueuedMessage` to use another shortcut.
+start of the composer to edit the last message in the queue. While editing,
+`Option/Alt+Up` moves to the previous queued message and `Option/Alt+Down` moves
+to the next. Moving forward past the last message restores your original draft.
+Save or cancel any unsaved text or attachment changes before switching messages;
+navigation never saves an edit automatically. These shortcuts follow the current
+queue order, including reordered messages. Change `thread.editQueuedMessage` or
+`thread.editNextQueuedMessage` in **Settings → Keybindings** to use other shortcuts.
+Queue navigation shortcuts are available on web and desktop.
 
 Mobile has the same choice under **Settings → Follow-ups**. While a turn is
 running the send button shows which action it will take. Long-press it to use the
