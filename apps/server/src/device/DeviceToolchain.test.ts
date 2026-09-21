@@ -3,10 +3,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import * as ProcessRunner from "../processRunner.ts";
 import { ensureDeviceHub, isDeviceHubInstalled } from "./DeviceToolchain.ts";
+const encodeManifest = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 it.effect("failed installation cleans staging and exposes only a safe failure message", () =>
   Effect.gen(function* () {
@@ -36,4 +38,74 @@ it.effect("failed installation cleans staging and exposes only a safe failure me
     expect(yield* isDeviceHubInstalled(baseDir)).toBe(false);
     expect(yield* fs.readDirectory(path.join(baseDir, "tools", "expo-device-hub"))).toEqual([]);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "a Duo archive installs separately from the released hub and verifies its source revision before publishing",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-duo-install-" });
+      const archive = path.join(baseDir, "prototype.tgz");
+      const previous = process.env.T3CODE_DEVICE_HUB_ARCHIVE;
+      process.env.T3CODE_DEVICE_HUB_ARCHIVE = archive;
+      const { DEVICE_HUB_DUO_VERSION, DEVICE_HUB_DUO_COMMIT } = yield* Effect.promise(
+        () => import("./DeviceToolchain.ts"),
+      );
+      const installs: string[][] = [];
+      let commit = "wrong-revision";
+      const run: ProcessRunner.ProcessRunner["Service"]["run"] = (request) =>
+        Effect.gen(function* () {
+          const args = [...(request.args ?? [])];
+          installs.push(args);
+          const staging = args[args.indexOf("--prefix") + 1]!;
+          const pkg = path.join(staging, "node_modules", "expo-device-hub");
+          yield* fs.makeDirectory(path.join(pkg, "dist", "server"), { recursive: true });
+          yield* fs.writeFileString(path.join(pkg, "dist", "server", "cli.mjs"), "// entry");
+          yield* fs.writeFileString(
+            path.join(pkg, "package.json"),
+            yield* encodeManifest({
+              version: DEVICE_HUB_DUO_VERSION,
+              t3DeviceHubBuild: { serveSimCommit: commit },
+            }),
+          );
+          return {
+            code: ChildProcessSpawner.ExitCode(0),
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+            stdoutInvalidUtf8: false,
+            stderrInvalidUtf8: false,
+          };
+        }).pipe(Effect.orDie);
+      yield* Effect.gen(function* () {
+        const failed = yield* ensureDeviceHub(baseDir).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, { run }),
+          Effect.flip,
+        );
+        expect(failed.step).toBe("verifying the pinned Duo build");
+        expect(yield* isDeviceHubInstalled(baseDir)).toBe(false);
+        commit = DEVICE_HUB_DUO_COMMIT;
+        const installed = yield* ensureDeviceHub(baseDir).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, { run }),
+        );
+        expect(installed.installDir).toContain(DEVICE_HUB_DUO_VERSION);
+        expect(yield* isDeviceHubInstalled(baseDir)).toBe(true);
+        expect(installs.every((args) => args.at(-1) === archive)).toBe(true);
+        yield* ensureDeviceHub(baseDir).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, { run }),
+        );
+        expect(installs).toHaveLength(2);
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (previous === undefined) delete process.env.T3CODE_DEVICE_HUB_ARCHIVE;
+            else process.env.T3CODE_DEVICE_HUB_ARCHIVE = previous;
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
