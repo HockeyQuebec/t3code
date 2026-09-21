@@ -620,6 +620,42 @@ export function createDeviceStreamClient(
     }
   };
 
+  const startDuoVideo = (panels: DuoPanelSinks) => {
+    for (const panel of panelClients) panel.stop();
+    // Physical handoff elects a native surface. Fixed-panel encoders can keep
+    // an inactive shutdown frame after election, so this build uses one active
+    // feed instead of decoding a third stream alongside the two fixed feeds.
+    const ids = screen?.supportsPhysicalOrientation ? ([null] as const) : ([1, 3] as const);
+    panelClients = ids.map((id) => {
+      const output = id === 1 ? panels.cover : panels.inner;
+      return createDeviceStreamClient(
+        { ...target, ...(id === null ? {} : { panelId: id }), videoOnly: true },
+        {
+          present(source, width, height) {
+            if (id === null) {
+              sink.present(source, width, height);
+              return;
+            }
+            // An inactive native LCD can emit its shutdown black frame. Retain its last useful image.
+            if (screen?.screenId !== id) return;
+            output.present(source, width, height);
+            sink.present(source, width, height);
+          },
+        },
+        {
+          onStatus: (status, detail) => {
+            if (status === "error") events.onDuoUnavailable?.(detail);
+          },
+          onScreen: () => {},
+          onInputConnected: () => {},
+          onMjpegFallback: () => {},
+          onUnauthorized: handleUnauthorized,
+        },
+      );
+    });
+    for (const panel of panelClients) panel.start();
+  };
+
   // iOS input socket; also carries the screen config the helper pushes.
   const connectIosInput = async () => {
     if (stopped) return;
@@ -652,6 +688,16 @@ export function createDeviceStreamClient(
               rotationCursor = screen.orientation;
             panelSinks?.onScreen?.(screen);
             events.onScreen(screen);
+            // A surface election can leave an existing decoder on the former
+            // encoder description. Reopen only video to acquire the elected
+            // surface's seed and codec configuration; HID and the viewer stay.
+            if (
+              panelSinks &&
+              screen.supportsPhysicalOrientation &&
+              previous &&
+              screen.screenId !== previous.screenId
+            )
+              startDuoVideo(panelSinks);
             if (pendingOrientation) {
               const receipt = pendingOrientation;
               pendingOrientation = null;
@@ -827,38 +873,7 @@ export function createDeviceStreamClient(
         if (useWebCodecs) void readIosVideo();
         return;
       }
-      // Physical handoff elects a native surface. Fixed-panel encoders can keep
-      // an inactive shutdown frame after election, so this build uses one active
-      // feed instead of decoding a third stream alongside the two fixed feeds.
-      const ids = screen?.supportsPhysicalOrientation ? ([null] as const) : ([1, 3] as const);
-      panelClients = ids.map((id) => {
-        const output = id === 1 ? panels.cover : panels.inner;
-        return createDeviceStreamClient(
-          { ...target, ...(id === null ? {} : { panelId: id }), videoOnly: true },
-          {
-            present(source, width, height) {
-              if (id === null) {
-                sink.present(source, width, height);
-                return;
-              }
-              // An inactive native LCD can emit its shutdown black frame. Retain its last useful image.
-              if (screen?.screenId !== id) return;
-              output.present(source, width, height);
-              sink.present(source, width, height);
-            },
-          },
-          {
-            onStatus: (status, detail) => {
-              if (status === "error") events.onDuoUnavailable?.(detail);
-            },
-            onScreen: () => {},
-            onInputConnected: () => {},
-            onMjpegFallback: () => {},
-            onUnauthorized: handleUnauthorized,
-          },
-        );
-      });
-      for (const panel of panelClients) panel.start();
+      startDuoVideo(panels);
     },
     sendTouch: (phase, x, y) => {
       if (platform === "ios") {
