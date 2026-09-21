@@ -50,9 +50,8 @@ it.effect(
       const archive = path.join(baseDir, "prototype.tgz");
       const previous = process.env.T3CODE_DEVICE_HUB_ARCHIVE;
       process.env.T3CODE_DEVICE_HUB_ARCHIVE = archive;
-      const { DEVICE_HUB_DUO_VERSION, DEVICE_HUB_DUO_COMMIT } = yield* Effect.promise(
-        () => import("./DeviceToolchain.ts"),
-      );
+      const { DEVICE_HUB_DUO_VERSION, DEVICE_HUB_DUO_COMMIT, DEVICE_HUB_DUO_PATCH } =
+        yield* Effect.promise(() => import("./DeviceToolchain.ts"));
       const installs: string[][] = [];
       let commit = "wrong-revision";
       const run: ProcessRunner.ProcessRunner["Service"]["run"] = (request) =>
@@ -67,7 +66,10 @@ it.effect(
             path.join(pkg, "package.json"),
             yield* encodeManifest({
               version: DEVICE_HUB_DUO_VERSION,
-              t3DeviceHubBuild: { serveSimCommit: commit },
+              t3DeviceHubBuild: {
+                serveSimCommit: commit,
+                physicalOrientationPatchSha256: DEVICE_HUB_DUO_PATCH,
+              },
             }),
           );
           return {

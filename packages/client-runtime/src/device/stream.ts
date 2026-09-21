@@ -39,6 +39,7 @@ export interface DeviceScreenSize {
   readonly orientation: "portrait" | "portrait_upside_down" | "landscape_left" | "landscape_right";
   readonly screenId?: number;
   readonly supportsHingeAngle?: boolean;
+  readonly supportsPhysicalOrientation?: boolean;
   readonly hingeAngle?: number;
   readonly hingePose?: DuoPose | null;
   readonly tableMode?: boolean;
@@ -56,6 +57,7 @@ const screenConfigSchema = Schema.Struct({
   ]),
   screenId: Schema.optionalKey(Schema.Number),
   supportsHingeAngle: Schema.optionalKey(Schema.Boolean),
+  supportsPhysicalOrientation: Schema.optionalKey(Schema.Boolean),
   hingeAngle: Schema.optionalKey(
     Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 180 })),
   ),
@@ -368,6 +370,8 @@ export function createDeviceStreamClient(
   const duoControl = createDuoControl({
     send(request) {
       if (socket?.readyState !== WebSocket.OPEN || !screen?.supportsHingeAngle) return false;
+      if (request.command.control === "physical" && !screen.supportsPhysicalOrientation)
+        return false;
       try {
         pendingOrientation = null;
         if (request.command.control === "orientation") {
@@ -571,7 +575,7 @@ export function createDeviceStreamClient(
               if (!current()) return;
               if (!configured) {
                 await reader.cancel().catch(() => {});
-                if (target.panelId) setStatus("error", "The Duo panel requires H.264 decoding.");
+                if (target.videoOnly) setStatus("error", "The Duo panel requires H.264 decoding.");
                 else fallBackToMjpeg();
                 return;
               }
@@ -823,12 +827,20 @@ export function createDeviceStreamClient(
         if (useWebCodecs) void readIosVideo();
         return;
       }
-      panelClients = ([1, 3] as const).map((id) => {
+      // Physical handoff elects a native surface. Fixed-panel encoders can keep
+      // an inactive shutdown frame after election, so this build uses one active
+      // feed instead of decoding a third stream alongside the two fixed feeds.
+      const ids = screen?.supportsPhysicalOrientation ? ([null] as const) : ([1, 3] as const);
+      panelClients = ids.map((id) => {
         const output = id === 1 ? panels.cover : panels.inner;
         return createDeviceStreamClient(
-          { ...target, panelId: id, videoOnly: true },
+          { ...target, ...(id === null ? {} : { panelId: id }), videoOnly: true },
           {
             present(source, width, height) {
+              if (id === null) {
+                sink.present(source, width, height);
+                return;
+              }
               // An inactive native LCD can emit its shutdown black frame. Retain its last useful image.
               if (screen?.screenId !== id) return;
               output.present(source, width, height);

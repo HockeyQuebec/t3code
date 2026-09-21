@@ -27,7 +27,9 @@ import * as ProcessRunner from "../processRunner.ts";
 const DEVICE_HUB_PACKAGE = "expo-device-hub";
 export const DEVICE_HUB_VERSION = "0.9.0";
 export const DEVICE_HUB_DUO_COMMIT = "bb265b11c13b395e5302d121458e2d42224a2e9f";
-export const DEVICE_HUB_DUO_VERSION = `${DEVICE_HUB_VERSION}-duo.${DEVICE_HUB_DUO_COMMIT.slice(0, 12)}`;
+export const DEVICE_HUB_DUO_PATCH =
+  "ed67a0803952b7554dae0466125c915850013d9042470d87e3d25cbb9827f01a";
+export const DEVICE_HUB_DUO_VERSION = `${DEVICE_HUB_VERSION}-duo.${DEVICE_HUB_DUO_COMMIT.slice(0, 12)}.physical.${DEVICE_HUB_DUO_PATCH.slice(0, 8)}`;
 const AGENT_DEVICE_PACKAGE = "agent-device";
 export const AGENT_DEVICE_VERSION = "0.20.10";
 
@@ -196,6 +198,7 @@ const installTool = Effect.fn("DeviceToolchain.installTool")(function* (
                   version: Schema.Literal(DEVICE_HUB_DUO_VERSION),
                   t3DeviceHubBuild: Schema.Struct({
                     serveSimCommit: Schema.Literal(DEVICE_HUB_DUO_COMMIT),
+                    physicalOrientationPatchSha256: Schema.Literal(DEVICE_HUB_DUO_PATCH),
                   }),
                 }),
               ),
