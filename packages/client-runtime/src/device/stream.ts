@@ -364,17 +364,29 @@ export function createDeviceStreamClient(
   let panelClients: DeviceStreamClient[] = [];
   let panelSinks: DuoPanelSinks | null = null;
   let rotationCursor: DeviceScreenSize["orientation"] | null = null;
+  let pendingOrientation: { requestId: number } | null = null;
   const duoControl = createDuoControl({
     send(request) {
       if (socket?.readyState !== WebSocket.OPEN || !screen?.supportsHingeAngle) return false;
       try {
-        socket.send(taggedJson(0x10, request));
+        pendingOrientation = null;
+        if (request.command.control === "orientation") {
+          const value = request.command.value;
+          pendingOrientation = { requestId: request.requestId };
+          rotationCursor = value;
+          // Upstream serializes orientation with hinge commands, then broadcasts config.
+          // An orientation-locked app can keep its framebuffer orientation after the sensor rotates.
+          socket.send(taggedJson(IOS_MSG_ORIENTATION, { orientation: value }));
+        } else socket.send(taggedJson(0x10, request));
         return true;
       } catch {
         return false;
       }
     },
-    onChange: (state) => events.onDuoControl?.(state),
+    onChange(state) {
+      if (!state.pending) pendingOrientation = null;
+      events.onDuoControl?.(state);
+    },
   });
   const videoPath = `/helper/${device}${target.panelId ? `/panel/${target.panelId}` : ""}/stream.avcc`;
 
@@ -636,6 +648,14 @@ export function createDeviceStreamClient(
               rotationCursor = screen.orientation;
             panelSinks?.onScreen?.(screen);
             events.onScreen(screen);
+            if (pendingOrientation) {
+              const receipt = pendingOrientation;
+              pendingOrientation = null;
+              duoControl.receive({
+                requestId: receipt.requestId,
+                ok: true,
+              });
+            }
           }
         }
       } catch {
@@ -875,8 +895,10 @@ export function createDeviceStreamClient(
         : (screen?.orientation ?? "portrait");
       const next =
         IOS_ORIENTATIONS[(IOS_ORIENTATIONS.indexOf(current) + 1) % IOS_ORIENTATIONS.length]!;
-      if (screen?.supportsHingeAngle) rotationCursor = next;
-      send(taggedJson(IOS_MSG_ORIENTATION, { orientation: next }));
+      if (screen?.supportsHingeAngle) {
+        rotationCursor = next;
+        duoControl.enqueue({ control: "orientation", value: next });
+      } else send(taggedJson(IOS_MSG_ORIENTATION, { orientation: next }));
     },
   };
 }
