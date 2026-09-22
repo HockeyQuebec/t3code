@@ -133,7 +133,7 @@ const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
-export const DEFAULT_MODEL = "gpt-5.6-sol";
+export const DEFAULT_MODEL = "gpt-6-astra";
 
 /**
  * Codex default-model preference, most preferred first. The provider snapshot
@@ -141,6 +141,8 @@ export const DEFAULT_MODEL = "gpt-5.6-sol";
  * default; when none are available, Codex's own `isDefault` flag wins.
  */
 export const PREFERRED_DEFAULT_CODEX_MODELS: ReadonlyArray<string> = [
+  DEFAULT_MODEL,
+  "gpt-6-sol",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
 ];
@@ -149,7 +151,7 @@ export const DEFAULT_TEXT_GENERATION_REASONING_EFFORT = "low";
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
-  [CLAUDE_DRIVER_KIND]: "claude-sonnet-5",
+  [CLAUDE_DRIVER_KIND]: "claude-fable-5-1",
   [CURSOR_DRIVER_KIND]: "auto",
   [GROK_DRIVER_KIND]: "grok-build",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
@@ -177,7 +179,12 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   [CLAUDE_DRIVER_KIND]: {
-    opus: "claude-opus-5",
+    fable: "claude-fable-5-1",
+    "fable-5.1": "claude-fable-5-1",
+    "claude-fable-5.1": "claude-fable-5-1",
+    opus: "claude-opus-5-5",
+    "opus-5.5": "claude-opus-5-5",
+    "claude-opus-5.5": "claude-opus-5-5",
     "opus-5": "claude-opus-5",
     "claude-opus-5.0": "claude-opus-5",
     "claude-opus-5-0": "claude-opus-5",

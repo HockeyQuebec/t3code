@@ -3,6 +3,8 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/providers"
+  | "/settings/usage"
+  | "/settings/dictation"
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/beta"
@@ -24,6 +26,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
+  "/settings/usage": "Usage",
+  "/settings/dictation": "Dictation",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
   "/settings/beta": "Beta",
@@ -37,6 +41,37 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "settings-dictation-enabled",
+    title: "Dictation",
+    to: "/settings/dictation",
+    targetId: "settings-dictation",
+  },
+  {
+    id: "settings-dictation-model",
+    title: "Dictation model",
+    to: "/settings/dictation",
+  },
+  {
+    id: "settings-dictation-language",
+    title: "Dictation language",
+    to: "/settings/dictation",
+  },
+  {
+    id: "settings-dictation-translate",
+    title: "Translate speech to English",
+    to: "/settings/dictation",
+  },
+  {
+    id: "settings-dictation-live",
+    title: "Live dictation",
+    to: "/settings/dictation",
+  },
+  {
+    id: "settings-dictation-space-bar",
+    title: "Space bar push-to-talk",
+    to: "/settings/dictation",
+  },
   {
     id: "theme",
     title: "Theme",

@@ -29,6 +29,13 @@ import * as ProviderSessionRuntime from "./persistence/ProviderSessionRuntime.ts
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
+import * as AgentLimits from "./agentLimits/AgentLimits.ts";
+import * as LocalLimitSources from "./agentLimits/LocalLimitSources.ts";
+import * as SpendLedger from "./agentLimits/SpendLedger.ts";
+import * as HarnessCatalog from "./harness/HarnessCatalog.ts";
+import * as ScheduledTurnScheduler from "./scheduling/ScheduledTurnScheduler.ts";
+import * as UsageLimitResume from "./scheduling/UsageLimitResume.ts";
+import * as ScheduledTurns from "./persistence/ScheduledTurns.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
@@ -46,6 +53,7 @@ import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
+import * as Dictation from "./dictation/Dictation.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -358,14 +366,51 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+// Limits and spend are both folded out of the provider event stream, so they
+// take `ProviderService` from the runtime layer provided below them rather than
+// building one of their own.
+// Local tools (claude-swap, Codex session logs, the Cursor CLI) top the limits
+// up with accounts no turn is running on.
+const AgentTelemetryLayerLive = Layer.mergeAll(
+  LocalLimitSources.layer.pipe(
+    Layer.provideMerge(AgentLimits.layer),
+    Layer.provide(ProcessRunner.layer),
+  ),
+  SpendLedger.layer,
+);
+
+// The scheduler dispatches real turns, so it needs the orchestration engine and
+// the read model as well as its own table; all three arrive with the runtime
+// layer it is folded into.
+const SchedulingLayerLive = ScheduledTurnScheduler.layer.pipe(
+  Layer.provideMerge(ScheduledTurns.layer),
+);
+
+// Resuming interrupted work needs the scheduler to queue into and the limit
+// tracker to ask when the window reopens, so it is built on top of both rather
+// than beside them.
+const AgentTelemetryAndSchedulingLayerLive = UsageLimitResume.layer.pipe(
+  Layer.provideMerge(Layer.mergeAll(AgentTelemetryLayerLive, SchedulingLayerLive)),
+);
+
+// Dictation shells out to a Whisper CLI and reads its knobs from settings, so
+// it is merged at the head where both the process runner and settings are
+// still being provided to it rather than by it.
+const DictationLayerLive = Dictation.layer.pipe(Layer.provide(ProcessRunner.layer));
+
+const RuntimeCoreDependenciesLive = Layer.mergeAll(ReactorLayerLive, DictationLayerLive).pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
-  Layer.provideMerge(ProviderRuntimeLayerLive),
+  // Folded into the provider runtime rather than added as another pipe step:
+  // `pipe` tops out at twenty arguments, and these services want
+  // `ProviderService` anyway.
+  Layer.provideMerge(
+    AgentTelemetryAndSchedulingLayerLive.pipe(Layer.provideMerge(ProviderRuntimeLayerLive)),
+  ),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(Keybindings.layer),
@@ -375,7 +420,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  Layer.provideMerge(
+    ProviderInstanceRegistryHydrationLive.pipe(Layer.provideMerge(HarnessCatalog.layer)),
+  ),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

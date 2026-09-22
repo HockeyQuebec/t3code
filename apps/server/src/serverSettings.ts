@@ -189,22 +189,43 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
 }
 
 function fallbackTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  const fallbackEntry = Object.entries(settings.providers).find(([, provider]) => provider.enabled);
-  const fallback = fallbackEntry ? ProviderDriverKind.make(fallbackEntry[0]) : undefined;
+  const fallback = nextEnabledTextGenerationProvider(settings);
   if (!fallback) {
     return settings;
   }
 
   return {
     ...settings,
-    textGenerationModelSelection: {
-      instanceId: ProviderInstanceId.make(fallback),
-      model:
-        DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
-        DEFAULT_MODEL_BY_PROVIDER[fallback] ??
-        DEFAULT_TEXT_GENERATION_MODEL,
-    } satisfies ModelSelection,
+    textGenerationModelSelection: fallback,
   };
+}
+
+/**
+ * Picks a different enabled provider's default text-generation model,
+ * skipping `excludeInstanceId`. Used to retry a text-generation call (e.g.
+ * thread title generation) on another provider after the configured one
+ * fails at runtime (rate limit, outage) without the provider itself being
+ * disabled in settings.
+ */
+export function nextEnabledTextGenerationProvider(
+  settings: ServerSettings,
+  excludeInstanceId?: ProviderInstanceId,
+): ModelSelection | undefined {
+  const fallbackEntry = Object.entries(settings.providers).find(
+    ([driverKind, provider]) => provider.enabled && driverKind !== excludeInstanceId,
+  );
+  const fallback = fallbackEntry ? ProviderDriverKind.make(fallbackEntry[0]) : undefined;
+  if (!fallback) {
+    return undefined;
+  }
+
+  return {
+    instanceId: ProviderInstanceId.make(fallback),
+    model:
+      DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
+      DEFAULT_MODEL_BY_PROVIDER[fallback] ??
+      DEFAULT_TEXT_GENERATION_MODEL,
+  } satisfies ModelSelection;
 }
 
 // Values under these keys are compared as a whole — never stripped field-by-field.

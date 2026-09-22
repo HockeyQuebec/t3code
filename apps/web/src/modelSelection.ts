@@ -62,9 +62,11 @@ function readInstanceCustomModels(
   if (instanceId !== defaultInstanceId) {
     return [];
   }
+  // Not every provider offers custom models — the harness advertises its
+  // workflows instead — so the column is optional rather than assumed.
   const legacyProviders = settings.providers as Record<
     string,
-    { readonly customModels: ReadonlyArray<string> } | undefined
+    { readonly customModels?: ReadonlyArray<string> } | undefined
   >;
   return legacyProviders[driverKind]?.customModels ?? [];
 }
@@ -74,6 +76,8 @@ export interface AppModelOption {
   name: string;
   shortName?: string;
   subProvider?: string;
+  /** One-line summary shown as a hover tooltip in the model picker. */
+  description?: string;
   isCustom: boolean;
   isDefault?: boolean;
   isLegacy?: boolean;
@@ -87,6 +91,7 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   };
   if (model.shortName) option.shortName = model.shortName;
   if (model.subProvider) option.subProvider = model.subProvider;
+  if (model.description) option.description = model.description;
   if (model.isDefault) option.isDefault = true;
   if (model.isLegacy) option.isLegacy = true;
   return option;

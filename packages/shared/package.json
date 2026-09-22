@@ -15,6 +15,18 @@
       "types": "./src/advertisedEndpoint.ts",
       "import": "./src/advertisedEndpoint.ts"
     },
+    "./tokenPricing": {
+      "types": "./src/tokenPricing.ts",
+      "import": "./src/tokenPricing.ts"
+    },
+    "./agentLimits": {
+      "types": "./src/agentLimits.ts",
+      "import": "./src/agentLimits.ts"
+    },
+    "./usageLimitResume": {
+      "types": "./src/usageLimitResume.ts",
+      "import": "./src/usageLimitResume.ts"
+    },
     "./agentAwareness": {
       "types": "./src/agentAwareness.ts",
       "import": "./src/agentAwareness.ts"
@@ -206,6 +218,38 @@
     "./devProxy": {
       "types": "./src/devProxy.ts",
       "import": "./src/devProxy.ts"
+    },
+    "./harnessRun": {
+      "types": "./src/harnessRun.ts",
+      "import": "./src/harnessRun.ts"
+    },
+    "./harnessStepStream": {
+      "types": "./src/harnessStepStream.ts",
+      "import": "./src/harnessStepStream.ts"
+    },
+    "./harnessWorkflow": {
+      "types": "./src/harnessWorkflow.ts",
+      "import": "./src/harnessWorkflow.ts"
+    },
+    "./harnessDescribe": {
+      "types": "./src/harnessDescribe.ts",
+      "import": "./src/harnessDescribe.ts"
+    },
+    "./harnessConfigPatch": {
+      "types": "./src/harnessConfigPatch.ts",
+      "import": "./src/harnessConfigPatch.ts"
+    },
+    "./harnessConfigMerge": {
+      "types": "./src/harnessConfigMerge.ts",
+      "import": "./src/harnessConfigMerge.ts"
+    },
+    "./whisperArgs": {
+      "types": "./src/whisperArgs.ts",
+      "import": "./src/whisperArgs.ts"
+    },
+    "./dictationTranscript": {
+      "types": "./src/dictationTranscript.ts",
+      "import": "./src/dictationTranscript.ts"
     }
   },
   "scripts": {

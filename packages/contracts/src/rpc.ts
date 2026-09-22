@@ -151,6 +151,21 @@ import {
   ResourceTelemetryRetryResult,
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
+import { AgentLimitsSnapshot, SpendSummary, SpendSummaryInput } from "./agentLimits.ts";
+import { HarnessCatalog, HarnessCatalogInput } from "./harness.ts";
+import {
+  DictationError,
+  DictationStatus,
+  TranscribeAudioInput,
+  TranscribeAudioResult,
+} from "./dictation.ts";
+import {
+  CancelScheduledTurnInput,
+  CancelScheduledTurnResult,
+  ScheduledTurn,
+  ScheduledTurnList,
+  ScheduleTurnInput,
+} from "./scheduledTurns.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -239,6 +254,12 @@ export const WS_METHODS = {
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
+  serverGetSpendSummary: "server.getSpendSummary",
+  serverGetHarnessCatalog: "server.getHarnessCatalog",
+  serverGetDictationStatus: "server.getDictationStatus",
+  serverTranscribeAudio: "server.transcribeAudio",
+  serverScheduleTurn: "server.scheduleTurn",
+  serverCancelScheduledTurn: "server.cancelScheduledTurn",
   serverSignalProcess: "server.signalProcess",
   serverReportClientActivity: "server.reportClientActivity",
   serverReportHostPowerState: "server.reportHostPowerState",
@@ -264,6 +285,8 @@ export const WS_METHODS = {
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
+  subscribeAgentLimits: "subscribeAgentLimits",
+  subscribeScheduledTurns: "subscribeScheduledTurns",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -792,6 +815,61 @@ export const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeReso
   stream: true,
 });
 
+export const WsServerScheduleTurnRpc = Rpc.make(WS_METHODS.serverScheduleTurn, {
+  payload: ScheduleTurnInput,
+  success: ScheduledTurn,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsServerCancelScheduledTurnRpc = Rpc.make(WS_METHODS.serverCancelScheduledTurn, {
+  payload: CancelScheduledTurnInput,
+  success: CancelScheduledTurnResult,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsSubscribeScheduledTurnsRpc = Rpc.make(WS_METHODS.subscribeScheduledTurns, {
+  payload: Schema.Struct({}),
+  success: ScheduledTurnList,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+export const WsSubscribeAgentLimitsRpc = Rpc.make(WS_METHODS.subscribeAgentLimits, {
+  payload: Schema.Struct({}),
+  success: AgentLimitsSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+export const WsServerGetSpendSummaryRpc = Rpc.make(WS_METHODS.serverGetSpendSummary, {
+  payload: SpendSummaryInput,
+  success: SpendSummary,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsServerGetHarnessCatalogRpc = Rpc.make(WS_METHODS.serverGetHarnessCatalog, {
+  payload: HarnessCatalogInput,
+  success: HarnessCatalog,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsServerGetDictationStatusRpc = Rpc.make(WS_METHODS.serverGetDictationStatus, {
+  payload: Schema.Struct({}),
+  success: DictationStatus,
+  error: EnvironmentAuthorizationError,
+});
+
+/**
+ * A clip in, its text out. `DictationError` is the failure a speaker can act on
+ * — no whisper installed, a clip too long, a decode that timed out — so it is
+ * modelled rather than dying, and the mic can say what went wrong in place.
+ */
+export const WsServerTranscribeAudioRpc = Rpc.make(WS_METHODS.serverTranscribeAudio, {
+  payload: TranscribeAudioInput,
+  success: TranscribeAudioResult,
+  error: Schema.Union([EnvironmentAuthorizationError, DictationError]),
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -809,6 +887,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessResourceHistoryRpc,
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
+  WsServerGetSpendSummaryRpc,
+  WsServerGetHarnessCatalogRpc,
+  WsServerGetDictationStatusRpc,
+  WsServerTranscribeAudioRpc,
+  WsServerScheduleTurnRpc,
+  WsServerCancelScheduledTurnRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
@@ -866,6 +950,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeAuthAccessRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
+  WsSubscribeAgentLimitsRpc,
+  WsSubscribeScheduledTurnsRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

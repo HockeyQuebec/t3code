@@ -66,6 +66,8 @@ export const ServerProviderModel = Schema.Struct({
   name: TrimmedNonEmptyString,
   shortName: Schema.optional(TrimmedNonEmptyString),
   subProvider: Schema.optional(TrimmedNonEmptyString),
+  /** One-line summary shown as a hover tooltip in the model picker. */
+  description: Schema.optional(TrimmedNonEmptyString),
   isCustom: Schema.Boolean,
   isDefault: Schema.optional(Schema.Boolean),
   isLegacy: Schema.optional(Schema.Boolean),

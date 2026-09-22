@@ -18,6 +18,7 @@ import {
   ExternalLauncherCommandNotFoundError,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
+  DictationError,
   type OrchestrationCommand,
   type OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
@@ -121,6 +122,29 @@ import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryR
 import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClient.ts";
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as AgentLimits from "./agentLimits/AgentLimits.ts";
+import * as SpendLedger from "./agentLimits/SpendLedger.ts";
+import * as HarnessCatalog from "./harness/HarnessCatalog.ts";
+import * as Dictation from "./dictation/Dictation.ts";
+import * as ScheduledTurnScheduler from "./scheduling/ScheduledTurnScheduler.ts";
+
+const emptySpendEntry = {
+  key: "total",
+  driver: Option.none(),
+  model: Option.none(),
+  tokens: {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+  },
+  reportedCostUsd: 0,
+  estimatedCostUsd: 0,
+  costSource: "none",
+  turns: 0,
+} as const;
 import * as Data from "effect/Data";
 
 const defaultProjectId = ProjectId.make("project-default");
@@ -550,6 +574,71 @@ const buildAppUnderTest = (options?: {
       ),
     );
 
+    // Limits and spend read the provider event stream, which these route tests
+    // never drive, so they stand in as empty rather than being wired up.
+    const agentTelemetryLayer = Layer.mergeAll(
+      Layer.mock(AgentLimits.AgentLimits)({
+        latest: Effect.map(DateTime.now, (readAt) => ({ readAt, providers: [] })),
+        changes: Stream.empty,
+        subscribe: Effect.map(DateTime.now, (readAt) => ({
+          latest: { readAt, providers: [] },
+          changes: Stream.empty,
+        })),
+      }),
+      Layer.mock(SpendLedger.SpendLedger)({
+        summarize: (input) =>
+          Effect.map(DateTime.now, (readAt) => ({
+            readAt,
+            window: input.window,
+            since: Option.none(),
+            truncated: false,
+            total: emptySpendEntry,
+            byDriver: [],
+            byModel: [],
+            assumptions: [],
+          })),
+      }),
+      // These route tests never queue work, so the scheduler stands in empty.
+      Layer.mock(ScheduledTurnScheduler.ScheduledTurnScheduler)({
+        schedule: () => Effect.die(new Error("scheduling not stubbed in this test")),
+        cancel: () => Effect.succeed({ cancelled: false }),
+        latest: Effect.map(DateTime.now, (readAt) => ({ readAt, scheduled: [] })),
+        changes: Stream.empty,
+        subscribe: Effect.map(DateTime.now, (readAt) => ({
+          latest: { readAt, scheduled: [] },
+          changes: Stream.empty,
+        })),
+        runDuePass: Effect.void,
+      }),
+      Layer.mock(Dictation.DictationService)({
+        status: Effect.succeed({
+          available: false,
+          binary: "whisper-ctranslate2",
+          resolvedPath: Option.none(),
+          fasterWhisper: false,
+          ffmpegAvailable: false,
+        }),
+        transcribe: () =>
+          Effect.fail(
+            new DictationError({
+              reason: "whisperMissing",
+              detail: "dictation not stubbed in this test",
+            }),
+          ),
+      }),
+      Layer.mock(HarnessCatalog.HarnessCatalogService)({
+        read: () =>
+          Effect.map(DateTime.now, (readAt) => ({
+            readAt,
+            configPath: Option.none(),
+            configScope: Option.none(),
+            binaryPath: Option.none(),
+            workflows: [],
+            unavailable: Option.some("noConfig" as const),
+          })),
+      }),
+    );
+
     const servedRoutesLayer = HttpRouter.serve(
       makeRoutesLayer.pipe(Layer.provide(ServiceLauncherClient.layer)),
       {
@@ -768,6 +857,7 @@ const buildAppUnderTest = (options?: {
 
     const appLayer = servedRoutesLayer.pipe(
       Layer.provide(resourceTelemetryLayer),
+      Layer.provide(agentTelemetryLayer),
       Layer.provide(
         Layer.mock(BrowserTraceCollector.BrowserTraceCollector)({
           record: () => Effect.void,

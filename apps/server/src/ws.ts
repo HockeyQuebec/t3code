@@ -104,6 +104,11 @@ import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as AgentLimits from "./agentLimits/AgentLimits.ts";
+import * as SpendLedger from "./agentLimits/SpendLedger.ts";
+import * as HarnessCatalog from "./harness/HarnessCatalog.ts";
+import * as Dictation from "./dictation/Dictation.ts";
+import * as ScheduledTurnScheduler from "./scheduling/ScheduledTurnScheduler.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -411,6 +416,11 @@ const makeWsRpcLayer = (
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
+      const agentLimits = yield* AgentLimits.AgentLimits;
+      const spendLedger = yield* SpendLedger.SpendLedger;
+      const harnessCatalog = yield* HarnessCatalog.HarnessCatalogService;
+      const dictation = yield* Dictation.DictationService;
+      const scheduledTurns = yield* ScheduledTurnScheduler.ScheduledTurnScheduler;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -1509,6 +1519,40 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetSpendSummary]: (input) =>
+          observeRpcEffect(WS_METHODS.serverGetSpendSummary, spendLedger.summarize(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverGetHarnessCatalog]: (input) =>
+          observeRpcEffect(WS_METHODS.serverGetHarnessCatalog, harnessCatalog.read(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverGetDictationStatus]: () =>
+          observeRpcEffect(WS_METHODS.serverGetDictationStatus, dictation.status, {
+            "rpc.aggregate": "server",
+          }),
+        // The clip itself is never traced: it is the user's voice, and an
+        // attribute is the wrong place for it even in a local collector.
+        [WS_METHODS.serverTranscribeAudio]: (input) =>
+          observeRpcEffect(WS_METHODS.serverTranscribeAudio, dictation.transcribe(input), {
+            "rpc.aggregate": "server",
+            "dictation.live": input.live,
+          }),
+        // A scheduling store failure is infrastructure, not something a client
+        // can act on, so it surfaces as a transport defect rather than being
+        // dressed up as an authorization error.
+        [WS_METHODS.serverScheduleTurn]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverScheduleTurn,
+            scheduledTurns.schedule(input).pipe(Effect.orDie),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverCancelScheduledTurn]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverCancelScheduledTurn,
+            scheduledTurns.cancel(input).pipe(Effect.orDie),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverSignalProcess]: (input) =>
           observeRpcEffect(WS_METHODS.serverSignalProcess, processDiagnostics.signal(input), {
             "rpc.aggregate": "server",
@@ -2102,6 +2146,26 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeResourceTelemetry,
             Stream.unwrap(
               Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>
+                Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscribeScheduledTurns]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeScheduledTurns,
+            Stream.unwrap(
+              Effect.map(scheduledTurns.subscribe.pipe(Effect.orDie), ({ latest, changes }) =>
+                Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscribeAgentLimits]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeAgentLimits,
+            Stream.unwrap(
+              Effect.map(agentLimits.subscribe, ({ latest, changes }) =>
                 Stream.concat(Stream.make(latest), changes),
               ),
             ),

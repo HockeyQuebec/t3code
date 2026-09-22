@@ -237,7 +237,9 @@ import {
   ProviderStatusBanner,
   shouldShowProviderStatusBanner,
 } from "./chat/ProviderStatusBanner";
+import { ScheduledThreadEmptyState } from "./chat/ScheduledThreadEmptyState";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { ThreadRecoveryPanel } from "./chat/ThreadRecoveryPanel";
 import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
@@ -2052,6 +2054,14 @@ function ChatViewContent(props: ChatViewProps) {
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
+  // The task a batch resume has to re-state is the last thing the user sent;
+  // a harness run keeps no session, so nothing else records what it was doing.
+  const lastUserMessageText = useMemo(() => {
+    const lastUserMessage = (activeThread?.messages ?? []).findLast(
+      (message) => message.role === "user" && (message.text ?? "").trim().length > 0,
+    );
+    return lastUserMessage?.text ?? null;
+  }, [activeThread?.messages]);
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),
     [threadActivities],
@@ -5001,6 +5011,22 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
+  /**
+   * Send a prompt nobody typed — a resume, or a queued turn run early.
+   *
+   * It goes out through the ordinary send path rather than a shortcut to the
+   * server, so it picks up the same model, worktree and thread bootstrapping a
+   * typed message would, and the same refusals when the thread is busy.
+   */
+  const sendPromptNow = async (prompt: string) => {
+    const trimmed = prompt.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    promptRef.current = trimmed;
+    await onSend();
+  };
+
   const onInterrupt = async () => {
     if (!activeThread) return;
     const result = await interruptThreadTurn({
@@ -5891,6 +5917,12 @@ function ChatViewContent(props: ChatViewProps) {
                 onIsAtEndChange={onIsAtEndChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
+                emptyPlaceholder={
+                  <ScheduledThreadEmptyState
+                    threadId={activeThread.id}
+                    onSendPrompt={sendPromptNow}
+                  />
+                }
                 topFadeEnabled={!hasTimelineTopBanner}
               />
 
@@ -5949,7 +5981,19 @@ function ChatViewContent(props: ChatViewProps) {
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                     </div>
                   ) : (
-                    <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                    <>
+                      <ThreadRecoveryPanel
+                        threadId={activeThread.id}
+                        activities={threadActivities}
+                        latestTurn={activeLatestTurn}
+                        isWorking={isWorking || isSendBusy}
+                        lastUserMessageText={lastUserMessageText}
+                        worktreePath={activeThread.worktreePath ?? null}
+                        providerDriverKind={selectedProvider}
+                        onSendPrompt={sendPromptNow}
+                      />
+                      <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                    </>
                   )}
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />

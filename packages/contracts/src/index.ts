@@ -28,4 +28,8 @@ export * from "./review.ts";
 export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./resourceTelemetry.ts";
+export * from "./agentLimits.ts";
+export * from "./dictation.ts";
+export * from "./harness.ts";
+export * from "./scheduledTurns.ts";
 export * from "./rpc.ts";

@@ -9,6 +9,9 @@ import {
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
 
+/** Shared so a caller-supplied empty state can fall back to the same sentence. */
+export const TIMELINE_EMPTY_PLACEHOLDER_TEXT = "Send a message to start the conversation.";
+
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;

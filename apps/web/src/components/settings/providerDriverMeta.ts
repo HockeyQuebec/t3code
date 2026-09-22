@@ -3,9 +3,11 @@ import {
   CodexSettings,
   CursorSettings,
   GrokSettings,
+  HarnessSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
+import { WorkflowIcon } from "lucide-react";
 import type * as Schema from "effect/Schema";
 import { ClaudeAI, CursorIcon, GrokIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
 
@@ -32,6 +34,11 @@ export interface ProviderClientDefinition {
    * built-in default or custom — advertises the same marker.
    */
   readonly badgeLabel?: string;
+  /**
+   * Optional hover copy shown as a tooltip next to the driver's label,
+   * for drivers whose name alone doesn't explain what picking them does.
+   */
+  readonly description?: string;
 }
 
 export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
@@ -66,6 +73,15 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "OpenCode",
     icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
+  },
+  {
+    value: ProviderDriverKind.make("harness"),
+    label: "Agent Harness",
+    icon: WorkflowIcon,
+    badgeLabel: "Early Access",
+    description:
+      "Runs a multi-step workflow — plan, implement, review — across several agents in an isolated worktree, instead of a single prompt to a single model.",
+    settingsSchema: HarnessSettings,
   },
 ];
 

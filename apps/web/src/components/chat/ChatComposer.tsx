@@ -13,6 +13,7 @@ import type {
   TurnId,
 } from "@t3tools/contracts";
 import {
+  DEFAULT_MODEL,
   ProviderDriverKind,
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -21,6 +22,7 @@ import {
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import { truncate } from "@t3tools/shared/String";
 import {
   memo,
   type ReactNode,
@@ -90,10 +92,20 @@ import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommand
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { useScheduleTurn } from "~/lib/scheduledTurnsState";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { newCommandId } from "~/lib/utils";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
+import { DictationControl, useDictationSessionState } from "./DictationControl";
+import { DictationSession } from "../../lib/dictationSession";
+import { useDictationStatus, useTranscribeAudio } from "../../lib/dictationState";
+import { useSpaceBarPushToTalk } from "../../lib/useSpaceBarPushToTalk";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { HarnessAgentsControl } from "./HarnessAgentsControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -446,6 +458,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
+  onScheduleSend?: ((runAtIso: string) => void | Promise<void>) | null;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -474,6 +487,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
+        onScheduleSend={props.onScheduleSend ?? null}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
@@ -938,6 +952,95 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
   const selectedModelForPicker = selectedModel;
+
+  // Queue the draft instead of sending it. A scheduled turn is dispatched
+  // against a real thread, so an unsent draft has to be promoted first: the
+  // thread is created up front (exactly as the send path bootstraps it) and the
+  // turn is queued against that persisted id.
+  const scheduleTurn = useScheduleTurn();
+  const createThreadForSchedule = useAtomCommand(threadEnvironment.create, {
+    reportFailure: false,
+  });
+  const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
+  const handleScheduleSend = useMemo(() => {
+    if (activeThreadId === null) {
+      return null;
+    }
+    // A draft route has no server thread yet, so scheduling has to promote it.
+    // Without a project there is nothing to promote it into.
+    const draftThreadToPromote = routeKind === "draft" ? activeThread : undefined;
+    if (routeKind === "draft" && (draftThreadToPromote === undefined || projectSelectionRequired)) {
+      return null;
+    }
+    return async (runAtIso: string) => {
+      const queuedPrompt = promptRef.current.trim();
+      if (queuedPrompt.length === 0) {
+        return;
+      }
+      if (draftThreadToPromote !== undefined) {
+        const createResult = await createThreadForSchedule({
+          environmentId,
+          input: {
+            threadId: activeThreadId,
+            projectId: draftThreadToPromote.projectId,
+            title: truncate(queuedPrompt),
+            modelSelection: createModelSelection(
+              selectedModelSelection.instanceId,
+              selectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
+              selectedModelSelection.options,
+            ),
+            runtimeMode,
+            interactionMode,
+            branch: draftThreadToPromote.branch,
+            worktreePath: draftThreadToPromote.worktreePath,
+            createdAt: draftThreadToPromote.createdAt,
+          },
+        });
+        // Never leave a scheduled row pointing at a thread that was not created.
+        if (createResult._tag === "Failure") {
+          toastManager.add({
+            type: "error",
+            title: "Could not queue this prompt",
+            description: "Creating the thread failed, so nothing was scheduled. Try again.",
+          });
+          return;
+        }
+      }
+      await scheduleTurn({
+        threadId: activeThreadId,
+        prompt: queuedPrompt,
+        modelSelection: selectedModelSelection,
+        // Already an absolute instant from the picker; passed through rather
+        // than reparsed, so the viewer's zone is not applied twice.
+        runAt: runAtIso,
+        commandId: newCommandId(),
+      });
+      // The prompt now lives on the queued turn, so clear the box the same way
+      // a send does — on any thread, not just a promoted draft. Leaving the
+      // text sitting there reads as "nothing happened", and the obvious
+      // response to that is to send it again.
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+    };
+  }, [
+    activeProjectDefaultModelSelection?.model,
+    activeThread,
+    activeThreadId,
+    clearComposerDraftContent,
+    composerDraftTarget,
+    composerRef,
+    createThreadForSchedule,
+    environmentId,
+    interactionMode,
+    projectSelectionRequired,
+    promptRef,
+    routeKind,
+    runtimeMode,
+    scheduleTurn,
+    selectedModel,
+    selectedModelSelection,
+  ]);
   // Instance-keyed option list so the picker can show each configured
   // instance (built-in + custom) as a first-class sidebar entry. The
   // options are server-reported models plus that exact instance's
@@ -1657,6 +1760,76 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setPrompt,
     ],
   );
+
+  // ------------------------------------------------------------------
+  // Dictation
+  // ------------------------------------------------------------------
+  const dictationStatus = useDictationStatus(environmentId);
+  const transcribeAudio = useTranscribeAudio(environmentId);
+  const dictationSettings = useEnvironmentSettings(
+    environmentId,
+    useCallback((settings: UnifiedSettings) => settings.dictation, []),
+  );
+  // The same conditions that stop the editor accepting typing stop it accepting
+  // speech; a mic that fills a box nobody can send from is a trap.
+  const dictationDisabled = isConnecting || isComposerApprovalState || projectSelectionRequired;
+  const dictationAvailable = dictationStatus?.available === true && !dictationDisabled;
+
+  // The session below is built once and outlives every re-render, so it reaches
+  // these through refs rather than capturing the render it was created in.
+  const transcribeAudioRef = useRef(transcribeAudio);
+  transcribeAudioRef.current = transcribeAudio;
+  const applyPromptReplacementRef = useRef(applyPromptReplacement);
+  applyPromptReplacementRef.current = applyPromptReplacement;
+
+  /**
+   * One session for the life of the composer. A ref rather than state because a
+   * recording outlives renders — the text streaming into the box is itself what
+   * re-renders us.
+   */
+  const dictationSessionRef = useRef<DictationSession | null>(null);
+  if (dictationSessionRef.current === null) {
+    dictationSessionRef.current = new DictationSession({
+      transcribe: (input) => transcribeAudioRef.current(input),
+      readPrompt: () => promptRef.current,
+      writeTranscript: (input) =>
+        applyPromptReplacementRef.current(input.rangeStart, input.rangeEnd, input.text, {
+          expectedText: input.expected,
+          // Mid-dictation the caret is left alone; placing it on every segment
+          // would fight anyone editing ahead of the transcript.
+          focusEditorAfterReplace: !input.live,
+        }),
+      onStateChange: () => {},
+      live: true,
+      liveSegmentSeconds: 6,
+    });
+  }
+  const dictationSession = dictationSessionRef.current;
+  const dictationState = useDictationSessionState(dictationSession);
+
+  // Settings are read when a recording starts, so a change applies to the next
+  // press rather than to the sentence already in flight.
+  useEffect(() => {
+    dictationSession.configure({
+      live: dictationSettings?.live ?? true,
+      liveSegmentSeconds: dictationSettings?.liveSegmentSeconds ?? 6,
+    });
+  }, [dictationSession, dictationSettings?.live, dictationSettings?.liveSegmentSeconds]);
+
+  useEffect(() => () => dictationSession.dispose(), [dictationSession]);
+
+  // A mic that vanished mid-sentence — the composer disabled, the environment
+  // gone — has to stop, not keep recording into nothing.
+  useEffect(() => {
+    if (!dictationAvailable && dictationSession.isRecording) {
+      void dictationSession.finish();
+    }
+  }, [dictationAvailable, dictationSession]);
+
+  useSpaceBarPushToTalk({
+    session: dictationSession,
+    enabled: dictationAvailable && dictationSettings?.spaceBarPushToTalk === true,
+  });
 
   const readComposerSnapshot = useCallback((): {
     value: string;
@@ -3217,6 +3390,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onRuntimeModeChange={handleRuntimeModeChange}
                       onTogglePlanSidebar={togglePlanSidebar}
                     />
+                    <HarnessAgentsControl
+                      workflow={selectedProvider === "harness" ? selectedModel : null}
+                      cwd={gitCwd}
+                    />
                   </>
                 )}
               </div>
@@ -3229,6 +3406,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                {dictationAvailable ? (
+                  <DictationControl
+                    session={dictationSession}
+                    state={dictationState}
+                    disabled={dictationDisabled}
+                    spaceBarPushToTalk={dictationSettings?.spaceBarPushToTalk === true}
+                  />
+                ) : null}
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
@@ -3248,6 +3433,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
+                  onScheduleSend={handleScheduleSend}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}
                   onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

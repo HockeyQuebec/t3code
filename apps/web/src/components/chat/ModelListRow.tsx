@@ -127,15 +127,20 @@ export const ModelListRow = memo(function ModelListRow(props: {
     </ComboboxItem>
   );
 
-  if (!props.disabledReason) {
+  const hoverText = props.disabledReason ?? props.model.description;
+  if (!hoverText) {
     return row;
   }
 
   return (
     <Tooltip>
       <TooltipTrigger render={row} />
-      <TooltipPopup side="left" align="center" className="max-w-64 text-balance leading-snug">
-        {props.disabledReason}
+      <TooltipPopup
+        side="left"
+        align="center"
+        className="max-w-64 whitespace-pre-line text-balance leading-snug"
+      >
+        {hoverText}
       </TooltipPopup>
     </Tooltip>
   );

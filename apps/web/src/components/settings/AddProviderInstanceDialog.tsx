@@ -1,7 +1,7 @@
 "use client";
 
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, InfoIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   ProviderInstanceId,
@@ -25,6 +25,7 @@ import {
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { DRIVER_OPTION_BY_VALUE, DRIVER_OPTIONS } from "./providerDriverMeta";
 import { ProviderSettingsForm, deriveProviderSettingsFields } from "./ProviderSettingsForm";
@@ -262,8 +263,26 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
                         className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
                       >
                         <IconComponent className="size-4 shrink-0" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                          {option.label}
+                        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium text-foreground">
+                          <span className="truncate">{option.label}</span>
+                          {option.description ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <InfoIcon
+                                    className="size-3.5 shrink-0 text-muted-foreground"
+                                    aria-hidden
+                                  />
+                                }
+                              />
+                              <TooltipPopup
+                                side="top"
+                                className="max-w-64 whitespace-normal leading-relaxed"
+                              >
+                                {option.description}
+                              </TooltipPopup>
+                            </Tooltip>
+                          ) : null}
                         </span>
                         <RadioPrimitive.Indicator
                           className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"

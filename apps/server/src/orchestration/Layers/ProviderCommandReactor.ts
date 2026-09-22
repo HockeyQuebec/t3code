@@ -29,7 +29,10 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
-import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
+import {
+  TextGeneration,
+  type ThreadTitleGenerationInput,
+} from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -40,6 +43,7 @@ import {
 } from "../Services/ProviderCommandReactor.ts";
 import { forkParked, ServerActivation } from "../../serverActivation.ts";
 import {
+  nextEnabledTextGenerationProvider,
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
 } from "../../serverSettings.ts";
@@ -853,6 +857,29 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const generateThreadTitleWithFallback = Effect.fn("generateThreadTitleWithFallback")(function* (
+    input: ThreadTitleGenerationInput,
+  ) {
+    return yield* textGeneration.generateThreadTitle(input).pipe(
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          const settings = yield* serverSettingsService.getSettings;
+          const fallbackSelection = nextEnabledTextGenerationProvider(
+            settings,
+            input.modelSelection.instanceId,
+          );
+          if (!fallbackSelection) {
+            return yield* Effect.failCause(cause);
+          }
+          return yield* textGeneration.generateThreadTitle({
+            ...input,
+            modelSelection: fallbackSelection,
+          });
+        }),
+      ),
+    );
+  });
+
   const maybeGenerateThreadTitleForFirstTurn = Effect.fn("maybeGenerateThreadTitleForFirstTurn")(
     function* (input: {
       readonly threadId: ThreadId;
@@ -866,7 +893,7 @@ const make = Effect.gen(function* () {
         const { textGenerationModelSelection: modelSelection } =
           yield* serverSettingsService.getSettings;
 
-        const generated = yield* textGeneration.generateThreadTitle({
+        const generated = yield* generateThreadTitleWithFallback({
           cwd: input.cwd,
           message: input.messageText,
           ...(attachments.length > 0 ? { attachments } : {}),
@@ -928,7 +955,7 @@ const make = Effect.gen(function* () {
       }) ?? process.cwd();
     const { textGenerationModelSelection: modelSelection } =
       yield* serverSettingsService.getSettings;
-    const generated = yield* textGeneration.generateThreadTitle({
+    const generated = yield* generateThreadTitleWithFallback({
       cwd,
       message,
       previousTitle,

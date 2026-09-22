@@ -683,6 +683,50 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetResourceTelemetryHistory,
       staleTimeMs: 5_000,
     }),
+    // Providers announce their remaining headroom rarely — once a turn at most —
+    // so this stream is cheap to hold open for as long as anything shows it.
+    agentLimits: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:agent-limits",
+      tag: WS_METHODS.subscribeAgentLimits,
+      idleTtlMs: 0,
+    }),
+    spendSummary: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:spend-summary",
+      tag: WS_METHODS.serverGetSpendSummary,
+      staleTimeMs: 5_000,
+    }),
+    // Scheduled work changes rarely and only when someone queues or cancels
+    // something, so a subscription is cheaper than polling for a due time.
+    scheduledTurns: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:scheduled-turns",
+      tag: WS_METHODS.subscribeScheduledTurns,
+      idleTtlMs: 0,
+    }),
+    scheduleTurn: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:schedule-turn",
+      tag: WS_METHODS.serverScheduleTurn,
+    }),
+    cancelScheduledTurn: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:cancel-scheduled-turn",
+      tag: WS_METHODS.serverCancelScheduledTurn,
+    }),
+    harnessCatalog: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:harness-catalog",
+      tag: WS_METHODS.serverGetHarnessCatalog,
+      staleTimeMs: 30_000,
+    }),
+    // Whether a whisper CLI exists barely changes, and the answer only decides
+    // whether a button is shown, so this is held for a long time rather than
+    // re-probed every time a composer mounts.
+    dictationStatus: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:dictation-status",
+      tag: WS_METHODS.serverGetDictationStatus,
+      staleTimeMs: 60_000,
+    }),
+    transcribeAudio: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:transcribe-audio",
+      tag: WS_METHODS.serverTranscribeAudio,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

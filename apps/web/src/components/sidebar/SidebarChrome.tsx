@@ -22,6 +22,7 @@ import {
 } from "../ui/sidebar";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
+import { SidebarUsageLimits } from "./SidebarUsageLimits";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -122,6 +123,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
+      <SidebarUsageLimits />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton onClick={handleSettingsClick}>

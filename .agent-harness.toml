@@ -1,0 +1,3896 @@
+version = 1
+
+# T3 Code workflow file for Agent Harness / Night Runner.
+#
+# THE RULE THIS FILE ENFORCES: no frontier model writes.
+#
+# Frontier models plan and review. They never hold a write-mode profile, in any
+# workflow, on any provider — GPT-5.6 Sol, Claude Opus, and Cursor Auto (which
+# routes to a premium model of its own choosing) are read-only here. Every edit
+# in every graph is made by a mid or small model: Luna, Terra, Haiku, Sonnet, or
+# Composer 2.5. When a cheap writer fails verification, the repair escalates to
+# the strongest NON-frontier writer in that workflow's provider set.
+#
+# Three properties make each of these a workflow rather than a chain:
+#
+#   1. Frontier models decide, they do not type. The top tier is read-only at
+#      both ends — it writes the work order and certifies the result — and every
+#      route is judged by a strictly better model than the one that wrote it.
+#   2. Supervision is mid-run. SECTION A is certified before SECTION B exists, so
+#      a bad first pass costs one section repair instead of a whole tested
+#      change. The section lead repairs a rejected section itself and
+#      re-certifies; the worker never gets an unbounded retry loop.
+#   3. The work order is written once. Both implement nodes are the same profile,
+#      so SECTION B runs in the worker's resumed session and never re-sends the
+#      plan or re-derives it from a judge's verdict.
+#
+# Exempt from (2), deliberately: the routine classifier branches, because routine
+# work is work that does not split into a behavior section and a verification
+# section, and `vibe_code`, which has no work order by design.
+#
+# THE DETERMINISTIC GATE. Between SECTION B and the frontier review, every
+# workflow runs:
+#
+#   vp fmt --check && vp lint && vp run -r typecheck && vp run -r test
+#
+# It runs them through the repo's own `node_modules/.bin`, so the gate does not
+# depend on pnpm or corepack being on the harness process's PATH — neither is,
+# on the machine this was written on. It does depend on the worktree having been
+# installed; `vp i` is what the t3.json worktree setup script is for.
+#
+# AGENTS.md tells interactive agents not to run repo-wide checks, and it is right
+# to: they burn the developer's machine mid-session and CI owns the full suite.
+# This is the documented exception. These runs are unattended and overnight, so
+# there is nobody to pick the targeted checks, and a judge that cannot compile
+# TypeScript will otherwise guess at type-level defects — and a wrong guess costs
+# a repair cycle and a review visit, which is far more expensive than the gate.
+# Cheapest checks run first so a failure surfaces early. Trim the tail of that
+# command if the full suite is too slow for your machine; leave `typecheck` in.
+
+# --- Claude ladder: Opus decides, Sonnet leads, Haiku types --------------------
+
+[agents.planner]
+provider = "claude"
+mode = "read"
+model = "haiku"
+reasoning = "low"
+timeout_seconds = 600
+max_budget_usd = 0.25
+allowed_tools = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash(graphify query:*)",
+  "Bash(graphify path:*)",
+  "Bash(graphify explain:*)",
+]
+
+# The architect. Read-only: it writes the work order and never the code.
+[agents.claude_architect]
+provider = "claude"
+mode = "read"
+model = "opus"
+reasoning = "high"
+timeout_seconds = 1200
+max_budget_usd = 1.5
+allowed_tools = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash(graphify query:*)",
+  "Bash(graphify path:*)",
+  "Bash(graphify explain:*)",
+]
+
+[agents.sonnet_planner]
+provider = "claude"
+mode = "read"
+model = "sonnet"
+reasoning = "medium"
+timeout_seconds = 900
+max_budget_usd = 0.75
+allowed_tools = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash(graphify query:*)",
+  "Bash(graphify path:*)",
+  "Bash(graphify explain:*)",
+]
+
+# The worker crew lead. `Task` is what makes this a crew rather than one agent:
+# the node dispatches a Haiku subagent per work unit, in parallel, and each gets
+# its own context instead of sharing one that grows with every file. Parallel
+# writers only stay safe because the work order gives each unit disjoint files.
+[agents.haiku_worker]
+provider = "claude"
+mode = "write"
+model = "haiku"
+reasoning = "medium"
+# Longer than a solo writer: this node is finished only when its slowest
+# subagent is, and it still has to integrate their work afterwards.
+timeout_seconds = 2700
+max_budget_usd = 1.5
+allowed_tools = ["Read", "Glob", "Grep", "Edit", "Write", "Task", "Bash"]
+
+# The section lead, in read mode. It gets `Task` too, so a section built by
+# several subagents can be certified by several read-only reviewers.
+[agents.sonnet_lead]
+provider = "claude"
+mode = "read"
+model = "sonnet"
+reasoning = "medium"
+timeout_seconds = 1200
+max_budget_usd = 1.0
+allowed_tools = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Task",
+  "Bash(git diff:*)",
+  "Bash(git status:*)",
+  "Bash(graphify query:*)",
+  "Bash(graphify path:*)",
+  "Bash(graphify explain:*)",
+]
+
+# The same section lead in write mode: repairs are made by the lead, never
+# handed back to the worker that wrote the rejected section.
+[agents.claude_implementer]
+provider = "claude"
+mode = "write"
+model = "sonnet"
+reasoning = "high"
+timeout_seconds = 2400
+max_budget_usd = 2.0
+allowed_tools = ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
+
+[agents.reviewer]
+provider = "claude"
+mode = "read"
+model = "sonnet"
+reasoning = "medium"
+timeout_seconds = 1200
+max_budget_usd = 1.0
+allowed_tools = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash(git diff:*)",
+  "Bash(git status:*)",
+  "Bash(graphify query:*)",
+  "Bash(graphify path:*)",
+  "Bash(graphify explain:*)",
+]
+
+[agents.claude_verifier]
+provider = "claude"
+mode = "read"
+model = "opus"
+reasoning = "high"
+timeout_seconds = 900
+max_budget_usd = 1.5
+allowed_tools = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Bash(git diff:*)",
+  "Bash(git status:*)",
+  "Bash(graphify query:*)",
+  "Bash(graphify path:*)",
+  "Bash(graphify explain:*)",
+]
+
+# --- Codex ladder: Sol decides, Terra leads, Luna types ------------------------
+
+[agents.codex_planner]
+provider = "codex"
+mode = "read"
+model = "gpt-5.6-luna"
+reasoning = "low"
+timeout_seconds = 600
+
+[agents.codex_architect]
+provider = "codex"
+mode = "read"
+model = "gpt-5.6-sol"
+reasoning = "high"
+timeout_seconds = 1200
+
+[agents.terra_planner]
+provider = "codex"
+mode = "read"
+model = "gpt-5.6-terra"
+reasoning = "medium"
+timeout_seconds = 900
+
+# Codex has no subagent primitive, so this crew is one worker per section rather
+# than several at once. The role separation is what ports, not the parallelism.
+[agents.codex_worker]
+provider = "codex"
+mode = "write"
+model = "gpt-5.6-luna"
+reasoning = "medium"
+timeout_seconds = 2400
+unsafe_bypass = true
+
+# The Codex section lead: Terra is the strongest model this file lets near a
+# write, and in read mode it is also what certifies each of Luna's sections.
+[agents.terra_lead]
+provider = "codex"
+mode = "read"
+model = "gpt-5.6-terra"
+reasoning = "medium"
+timeout_seconds = 1200
+
+[agents.implementer]
+provider = "codex"
+mode = "write"
+model = "gpt-5.6-terra"
+reasoning = "high"
+timeout_seconds = 2400
+unsafe_bypass = true
+
+[agents.routine_implementer]
+provider = "codex"
+mode = "write"
+model = "gpt-5.6-luna"
+reasoning = "medium"
+timeout_seconds = 1800
+unsafe_bypass = true
+
+[agents.routine_reviewer]
+provider = "codex"
+mode = "read"
+model = "gpt-5.6-terra"
+reasoning = "low"
+timeout_seconds = 900
+
+[agents.codex_verifier]
+provider = "codex"
+mode = "read"
+model = "gpt-5.6-sol"
+reasoning = "medium"
+timeout_seconds = 900
+
+[agents.codex_critical_verifier]
+provider = "codex"
+mode = "read"
+model = "gpt-5.6-sol"
+reasoning = "high"
+timeout_seconds = 1200
+
+# --- Cursor: two tiers, so Auto decides and Composer types ---------------------
+
+# Cursor's non-interactive CLI requires --force, which Agent Harness exposes only
+# through this explicit unsafe opt-in. The workflow still runs in an isolated
+# worktree and external effects remain portfolio-policy gated.
+[agents.cursor_composer]
+provider = "cursor"
+mode = "write"
+model = "composer-2.5"
+timeout_seconds = 2400
+unsafe_bypass = true
+
+# The Cursor-only route has exactly one writer model available, since Auto is
+# read-only here. Its section lead therefore repairs with a second Composer
+# profile: same model, different team member, so a rejected section is still
+# never handed back to the agent that wrote it.
+[agents.cursor_composer_lead]
+provider = "cursor"
+mode = "write"
+model = "composer-2.5"
+timeout_seconds = 2400
+unsafe_bypass = true
+
+# Auto is Cursor's frontier tier, so it decides and never writes. Three separate
+# profiles because a profile is a team member: sharing one would let the review
+# be the plan's own session agreeing with itself.
+[agents.cursor_auto_architect]
+provider = "cursor"
+mode = "read"
+model = "auto"
+timeout_seconds = 900
+unsafe_bypass = true
+
+[agents.cursor_auto_lead]
+provider = "cursor"
+mode = "read"
+model = "auto"
+timeout_seconds = 900
+unsafe_bypass = true
+
+[agents.cursor_auto_reviewer]
+provider = "cursor"
+mode = "read"
+model = "auto"
+timeout_seconds = 900
+unsafe_bypass = true
+
+# Claude + Codex. Sol writes the work order and never edits, Terra implements it
+# one section at a time, a Sonnet section lead certifies each section and makes
+# every repair itself, and Opus certifies the tested result. The two decisions —
+# what to build and whether it is right — come from different providers, so the
+# review is genuinely independent of the plan.
+# Deliberately minimal: the smallest writer, mid effort, a hard ceiling, and no
+# Task tool. This profile exists so there is something cheap to reach for when
+# the change is one a test run can certify on its own.
+[agents.quick_writer]
+provider = "claude"
+mode = "write"
+model = "haiku"
+reasoning = "medium"
+timeout_seconds = 1800
+max_budget_usd = 0.75
+allowed_tools = ["Read", "Glob", "Grep", "Edit", "Write"]
+
+[workflows.evaluated_change]
+description = "Codex plans, a mid model writes core then tests under supervision, then deterministic verify plus an independent Opus review."
+entrypoint = "plan"
+workspace = "worktree"
+base_ref = "HEAD"
+# Two supervised sections plus a verify/review loop, each with its own
+# bounded repairs. The per-node max_visits are what stop this workflow.
+max_steps = 26
+max_wall_seconds = 14400
+max_cost_usd = 25.0
+
+[workflows.evaluated_change.nodes.plan]
+kind = "agent"
+agent = "codex_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.evaluated_change.nodes.implement_core]
+kind = "agent"
+agent = "implementer"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.evaluated_change.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.evaluated_change.nodes.supervise_core]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.evaluated_change.nodes.lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.evaluated_change.nodes.implement_tests]
+kind = "agent"
+agent = "implementer"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.evaluated_change.nodes.supervise_tests]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.evaluated_change.nodes.lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.evaluated_change.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.evaluated_change.nodes.review]
+kind = "judge"
+agent = "claude_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+A Sol work order, a Terra implementation, two Sonnet section
+certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.evaluated_change.nodes.lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# The one workflow with no work order, on purpose: vibe_code exists for the case
+# where the shape of the change is discovered by making it. There is no section
+# to certify mid-run, so it is the single exception to the supervision rule. The
+# other two halves still hold — Terra types, Sol decides whether the result is
+# right — and a rejected change is repaired by the Sonnet lead rather than handed
+# back to the writer.
+[workflows.vibe_code]
+description = "One writer, deterministic tests, bounded repair, one review. The cheapest supervised loop here."
+entrypoint = "implement"
+workspace = "worktree"
+base_ref = "HEAD"
+max_steps = 9
+max_wall_seconds = 10800
+max_cost_usd = 10.0
+
+[workflows.vibe_code.nodes.implement]
+kind = "agent"
+agent = "implementer"
+on_success = "changed"
+on_failure = "failed"
+prompt = """
+Vibe-code this T3 Code task end to end:
+<task>{{task}}</task>
+Own the outcome and keep moving without asking for implementation choices.
+Inspect the whole repository as needed. You may add, edit, refactor, move, or
+remove any files you believe should change, including adjacent code and tests,
+when that produces a more coherent result.
+
+Nobody supervises this while you make it, so the surfaces are yours to get right:
+a behavior reachable from the chat view is usually also reachable from Settings,
+the command palette, and a keybinding, and web, desktop, and mobile all exist.
+Anything crossing the wire is typed in `packages/contracts`. Keep orchestration
+pure and complexity at the adapter boundary.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.vibe_code.nodes.changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "tests"
+on_failure = "failed"
+
+[workflows.vibe_code.nodes.tests]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 3
+on_success = "review"
+on_failure = "repair"
+
+[workflows.vibe_code.nodes.repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "tests"
+on_failure = "failed"
+prompt = """
+You are the lead, repairing a vibe-coded change you did not write:
+<task>{{task}}</task>
+<verification>{{last_output}}</verification>
+Read the current files before you change them — the writer had broad authority
+and the diff is not the file. Repair the root cause without weakening useful
+checks, then verify it again.
+"""
+
+[workflows.vibe_code.nodes.review]
+kind = "judge"
+agent = "codex_verifier"
+max_visits = 2
+on_success = "done"
+on_failure = "repair"
+prompt = """
+Independently review the complete workspace diff for this vibe-code task:
+<task>{{task}}</task>
+Nobody supervised this change while it was being made, so this is the only
+judgment pass it gets: fail for concrete correctness, contract, surface-coverage,
+performance, recovery, or security defects that should be fixed before handoff.
+Optional polish is not a failure. Inspect only; do not edit.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+# A read-only question: the whole workflow is a decision and nothing is typed, so
+# the frontier tier is exactly what should answer it.
+[workflows.evaluated_review]
+description = "A single Opus read-only pass over the current diff. No writes."
+entrypoint = "review"
+workspace = "worktree"
+base_ref = "HEAD"
+max_steps = 1
+max_wall_seconds = 1800
+max_cost_usd = 3.0
+
+[workflows.evaluated_review.nodes.review]
+kind = "agent"
+agent = "claude_verifier"
+on_success = "done"
+on_failure = "failed"
+prompt = """
+Answer this question about the T3 Code repository and cite concrete file/symbol
+evidence for every claim:
+<task>{{task}}</task>
+Do not edit.
+"""
+
+# Claude + Codex with cheap independent reconnaissance in front of the architect.
+# The scouts are read-only and cheap, the architect is read-only and frontier, and
+# everything writable below it is Terra under a Sonnet section lead.
+[workflows.dual_agent]
+description = "Two-provider research fanout, then a plan, supervised sections, and an independent review."
+entrypoint = "research"
+workspace = "worktree"
+base_ref = "HEAD"
+max_steps = 27
+max_wall_seconds = 14400
+max_cost_usd = 25.0
+
+[workflows.dual_agent.nodes.research]
+kind = "fanout"
+agents = ["planner", "codex_planner"]
+on_success = "plan"
+on_failure = "failed"
+prompt = """
+Independently investigate this T3 Code task before anyone edits:
+<task>{{task}}</task>
+Return a compact approach with exact files, the contracts and surfaces involved,
+likely failure modes, and focused verification. Do not edit. Both results go to
+the architect, who resolves your disagreements against the repository.
+"""
+
+[workflows.dual_agent.nodes.plan]
+kind = "agent"
+agent = "codex_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+<independent_research>{{last_output}}</independent_research>
+
+Resolve the scouts' disagreements against the repository itself; a claim
+neither scout verified is not evidence.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.dual_agent.nodes.implement_core]
+kind = "agent"
+agent = "implementer"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.dual_agent.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.dual_agent.nodes.supervise_core]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.dual_agent.nodes.lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.dual_agent.nodes.implement_tests]
+kind = "agent"
+agent = "implementer"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.dual_agent.nodes.supervise_tests]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.dual_agent.nodes.lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.dual_agent.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.dual_agent.nodes.review]
+kind = "judge"
+agent = "claude_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+Two independent scouts, a Sol work order, a Terra implementation, two
+Sonnet section certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.dual_agent.nodes.lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# Cost-sensitive three-provider route. Cursor Composer does all the typing, cheap
+# Claude and Codex scouts do the reconnaissance, Sol writes the work order and
+# certifies the tested result, and a Sonnet section lead certifies each section
+# and makes the repairs. Composer never decides what to build and never repairs
+# its own rejected section.
+[workflows.composer_change]
+description = "Research fanout and plan, with Cursor Composer writing and Codex reviewing."
+entrypoint = "research"
+workspace = "worktree"
+base_ref = "HEAD"
+max_steps = 27
+max_wall_seconds = 14400
+max_cost_usd = 25.0
+
+[workflows.composer_change.nodes.research]
+kind = "fanout"
+agents = ["planner", "codex_planner"]
+on_success = "plan"
+on_failure = "failed"
+prompt = """
+Independently investigate this task before Cursor edits:
+<task>{{task}}</task>
+For a feature, map integration points, surfaces, and acceptance tests. For a bug,
+find a reproduction and root cause. For a refactor, identify behavior that must
+remain unchanged. Return compact evidence with exact files. Do not edit.
+"""
+
+[workflows.composer_change.nodes.plan]
+kind = "agent"
+agent = "codex_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+<independent_research>{{last_output}}</independent_research>
+
+Resolve the scouts' claims against the repository. The worker is Cursor
+Composer working directly in one session, so keep each unit executable
+without subagents.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.composer_change.nodes.implement_core]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.composer_change.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.composer_change.nodes.supervise_core]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.composer_change.nodes.lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.composer_change.nodes.implement_tests]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.composer_change.nodes.supervise_tests]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.composer_change.nodes.lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.composer_change.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.composer_change.nodes.review]
+kind = "judge"
+agent = "codex_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+Two independent scouts, a Sol work order, a Cursor Composer
+implementation, two Sonnet section certifications, and the deterministic
+gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.composer_change.nodes.lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# Recommended adaptive route when all three providers are available. One cheap
+# Luna classification chooses one of three routes, and all three obey the same
+# rule: the most capable model in the route decides and never types, the cheapest
+# model that can do the editing does it, and a rejected pass is repaired by the
+# lead rather than retried by the worker.
+#
+#   ROUTINE  -> Luna writes one bounded change, Terra certifies and repairs it
+#   STANDARD -> Terra writes the work order, Composer implements it section by
+#               section under a Terra lead who repairs, Sol certifies
+#   CRITICAL -> Luna + Haiku scout, Sol writes the work order, Composer implements
+#               each section under a Sonnet lead, Sol then Opus certify
+#
+# Fast Cursor variants are deliberately absent: they change throughput rather than
+# intelligence and consume the same included pool far faster.
+[workflows.model_council]
+description = "Widest loop in the file: a classifier routes across three provider branches. Deepest and most expensive; reach for it deliberately."
+entrypoint = "classify"
+workspace = "worktree"
+base_ref = "HEAD"
+max_steps = 34
+max_wall_seconds = 16200
+max_cost_usd = 30.0
+
+[workflows.model_council.nodes.classify]
+kind = "agent"
+agent = "codex_planner"
+on_success = "routine_gate"
+on_failure = "failed"
+prompt = """
+Classify this T3 Code task so the team can be sized to it. Inspect only enough of
+the repository to judge its real blast radius; do not edit and do not solve it.
+<task>{{task}}</task>
+
+ROUTINE is bounded, well-specified work: docs or comments, mechanical tests or
+configuration, localized boilerplate, a small change inside an existing pattern,
+or a narrow bug with a known reproduction and no boundary risk. It is work that
+does not split into a behavior section and a verification section, and that
+touches one surface rather than several.
+
+CRITICAL means failure could cross a trust or durability boundary: auth,
+permissions, secrets, destructive behavior, data loss, the event-sourced store or
+a schema migration, checkpointing, concurrency, the websocket/relay/tunnel
+transport, provider adapter protocol changes, `packages/contracts` changes that
+every client follows, public compatibility, a large behavioral refactor, or a
+hard nondeterministic production bug. It also covers work whose shape is
+genuinely unclear, because that is what an architect is for.
+
+Everything else is STANDARD: ordinary features, contained bug fixes, frontend
+work, and bounded behavioral refactors.
+
+Return one short reason, then exactly one final line:
+ROUTE: ROUTINE
+or
+ROUTE: STANDARD
+or
+ROUTE: CRITICAL
+"""
+
+[workflows.model_council.nodes.routine_gate]
+kind = "gate"
+checks = [{ type = "output_matches", pattern = "(?m)^ROUTE: ROUTINE\\s*$" }]
+on_success = "routine_implement"
+on_failure = "standard_gate"
+
+[workflows.model_council.nodes.standard_gate]
+kind = "gate"
+# A malformed classifier answer escalates rather than silently buying the
+# cheaper route: STANDARD is the only positive match; everything else is safe.
+checks = [{ type = "output_matches", pattern = "(?m)^ROUTE: STANDARD\\s*$" }]
+on_success = "standard_plan"
+on_failure = "critical_research"
+
+# The routine route is deliberately unsectioned: a task classified as routine is
+# one that does not split into a behavior section and a verification section, so
+# mid-run supervision would buy a second certification of the same small diff.
+# The rest of the rule still holds — the cheap tier types, a stronger model
+# certifies, and that model makes the repair rather than handing the worker a
+# retry loop.
+[workflows.model_council.nodes.routine_implement]
+kind = "agent"
+agent = "routine_implementer"
+on_success = "routine_changed"
+on_failure = "failed"
+prompt = """
+Implement this bounded T3 Code task end to end:
+<task>{{task}}</task>
+Stay inside the established repository patterns, add focused tests when
+behavior changes, and validate the result with `vp test run <files>` for the
+tests you touched. A stronger model certifies this and repairs it itself if
+it fails, so keep the change small and coherent rather than ambitious.
+
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.model_council.nodes.routine_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "routine_verify"
+on_failure = "failed"
+
+[workflows.model_council.nodes.routine_verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "routine_review"
+on_failure = "routine_repair"
+
+[workflows.model_council.nodes.routine_review]
+kind = "judge"
+agent = "routine_reviewer"
+max_visits = 3
+on_success = "done"
+on_failure = "routine_repair"
+prompt = """
+Certify the tested diff for this bounded task:
+<task>{{task}}</task>
+Fail only for concrete correctness, contract, surface-coverage, state,
+recovery, or security defects. Optional polish is a pass.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.model_council.nodes.routine_repair]
+kind = "agent"
+agent = "implementer"
+max_visits = 3
+on_success = "routine_verify"
+on_failure = "failed"
+prompt = """
+You certified this bounded change and it failed. Repair it yourself:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+The cheaper pass already failed here, so fix the root cause properly rather
+than repeating its approach, and do not weaken useful checks.
+"""
+
+# Terra decides what to build, standard-speed Composer types it, and Terra
+# certifies each section and makes every repair itself — the strongest writer the
+# no-frontier-writes rule allows in this provider set.
+[workflows.model_council.nodes.standard_plan]
+kind = "agent"
+agent = "terra_planner"
+on_success = "standard_implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+Cursor Composer executes this in one direct session, so keep each unit
+executable without subagents or model switching.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.model_council.nodes.standard_implement_core]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "standard_core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.model_council.nodes.standard_core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "standard_supervise_core"
+on_failure = "failed"
+
+[workflows.model_council.nodes.standard_supervise_core]
+kind = "judge"
+agent = "terra_lead"
+max_visits = 3
+on_success = "standard_implement_tests"
+on_failure = "standard_lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.model_council.nodes.standard_lead_fix_core]
+kind = "agent"
+agent = "implementer"
+max_visits = 2
+on_success = "standard_supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.model_council.nodes.standard_implement_tests]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "standard_supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.model_council.nodes.standard_supervise_tests]
+kind = "judge"
+agent = "terra_lead"
+max_visits = 3
+on_success = "standard_verify"
+on_failure = "standard_lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.model_council.nodes.standard_lead_fix_tests]
+kind = "agent"
+agent = "implementer"
+max_visits = 2
+on_success = "standard_supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.model_council.nodes.standard_verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "standard_review"
+on_failure = "standard_lead_repair"
+
+[workflows.model_council.nodes.standard_review]
+kind = "judge"
+agent = "codex_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "standard_lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+A Terra work order, a Cursor Composer implementation, two Terra section
+certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.model_council.nodes.standard_lead_repair]
+kind = "agent"
+agent = "implementer"
+max_visits = 3
+on_success = "standard_verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# The critical route buys cheap reconnaissance before the expensive decision, so
+# Sol spends its context on the design rather than on repository discovery.
+[workflows.model_council.nodes.critical_research]
+kind = "fanout"
+agents = ["planner", "codex_planner"]
+on_success = "critical_plan"
+on_failure = "failed"
+prompt = """
+Independently investigate this critical T3 Code task before anyone edits:
+<task>{{task}}</task>
+Trace the trust, durability, transport, contract, and recovery boundaries it
+touches. For bugs, identify a reproduction and root cause; for features or
+refactors, map the event/command/projection flow, failure behavior, migration
+needs, affected surfaces, and tests. Return compact evidence with exact files.
+Do not edit.
+"""
+
+[workflows.model_council.nodes.critical_plan]
+kind = "agent"
+agent = "codex_architect"
+on_success = "critical_implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+<independent_research>{{last_output}}</independent_research>
+
+Resolve the scouts' disagreements against the repository. Name every trust,
+durability, contract, transport, and recovery invariant that must survive
+this change, and give SECTION B the failure-path coverage that proves it.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.model_council.nodes.critical_implement_core]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "critical_core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.model_council.nodes.critical_core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "critical_supervise_core"
+on_failure = "failed"
+
+[workflows.model_council.nodes.critical_supervise_core]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "critical_implement_tests"
+on_failure = "critical_lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.model_council.nodes.critical_lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "critical_supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.model_council.nodes.critical_implement_tests]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "critical_supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.model_council.nodes.critical_supervise_tests]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "critical_verify"
+on_failure = "critical_lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.model_council.nodes.critical_lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "critical_supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.model_council.nodes.critical_verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "critical_review"
+on_failure = "critical_lead_repair"
+
+[workflows.model_council.nodes.critical_review]
+kind = "judge"
+agent = "codex_critical_verifier"
+max_visits = 3
+on_success = "critical_claude_verify"
+on_failure = "critical_lead_repair"
+prompt = """
+Certify the tested critical diff for:
+<task>{{task}}</task>
+Focus on the changed code and its trust, durability, concurrency, migration,
+contract, transport, and recovery boundaries. Return at most three concrete
+blocking findings. Optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.model_council.nodes.critical_lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "critical_verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# The second frontier pass is a different provider from the first on purpose: two
+# certifications from the same model family mostly agree with each other.
+[workflows.model_council.nodes.critical_claude_verify]
+kind = "judge"
+agent = "claude_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "critical_lead_repair"
+prompt = """
+Perform the final independent frontier review of this tested critical diff:
+<task>{{task}}</task>
+Codex and Claude scouts, a Sol work order, a Cursor Composer implementation,
+two Sonnet section certifications, the deterministic gate, and a Sol
+certification have already run. Look only for concrete defects at critical
+boundaries or invalid assumptions shared by the earlier passes. Return at most
+three blockers; optional improvements are a pass. Inspect only; do not edit.
+"""
+
+# The explicit Claude team hierarchy: Opus plans, a Haiku crew implements section
+# by section, Sonnet leads each section, Opus certifies the finished change.
+#
+# The engine's fanout is read-only, so the sections are sequential; the crew's
+# parallelism lives one level down, in the worker's own Task subagents.
+[workflows.claude_team]
+description = "Claude end to end: Sonnet leads a Haiku crew through supervised sections, then verify and review."
+entrypoint = "plan"
+workspace = "worktree"
+base_ref = "HEAD"
+# Two supervised sections plus a verify/review loop, each with its own
+# bounded repairs. The per-node max_visits are what stop this workflow.
+max_steps = 26
+max_wall_seconds = 14400
+max_cost_usd = 20.0
+
+[workflows.claude_team.nodes.plan]
+kind = "agent"
+agent = "claude_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+The workers are small models, so they need instructions they can execute
+without inferring your intent.
+
+A crew of Haiku workers implements this, several at once, so split each section
+into numbered work units that can be built **concurrently**: every unit must own
+a disjoint set of files. Two units may read the same file, but exactly one unit
+may write it. When a change genuinely cannot be split that way, say so and give
+that section a single unit — a correct serial plan beats a parallel one that
+makes two workers edit the same function.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.claude_team.nodes.implement_core]
+kind = "agent"
+agent = "haiku_worker"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Dispatch one Task subagent per SECTION A unit, launched in parallel in a single
+message, each told its goal, its WRITES and READS lists, its acceptance criteria,
+and that files outside its WRITES list belong to another worker running right
+now. One unit means one subagent, and you may implement that one yourself
+instead. Subagents do not launch dev servers. When they return you own the
+integration: read the files they actually wrote, reconcile the seams, and report
+per unit.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.claude_team.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.claude_team.nodes.supervise_core]
+kind = "judge"
+agent = "sonnet_lead"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+The section was built by several subagents at once, each owning different
+files, so check it the same way: when the crew reported three or more units,
+dispatch a read-only Task subagent per unit, in parallel, then judge their
+reports yourself.
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.claude_team.nodes.lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.claude_team.nodes.implement_tests]
+kind = "agent"
+agent = "haiku_worker"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Dispatch the SECTION B units the same way: one Task subagent per unit,
+launched in parallel in a single message, then integrate their work
+yourself. Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.claude_team.nodes.supervise_tests]
+kind = "judge"
+agent = "sonnet_lead"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.claude_team.nodes.lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.claude_team.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.claude_team.nodes.review]
+kind = "judge"
+agent = "claude_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+An Opus work order, a Haiku crew implementation, two Sonnet section
+certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.claude_team.nodes.lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# The automatic Claude route: one cheap Haiku classification decides how much
+# team the task earns, so nobody has to pick a workflow by hand.
+#
+#   ROUTINE  -> Haiku writes one bounded change, Sonnet certifies and repairs it
+#   STANDARD -> Sonnet writes the work order, a Haiku crew implements it section
+#               by section under a Sonnet section lead, Sonnet certifies
+#   CRITICAL -> the same shape one tier up: Opus writes the work order and
+#               certifies the result
+#
+# A malformed classification escalates to CRITICAL rather than silently buying a
+# cheaper route.
+[workflows.auto_claude]
+description = "Classifier routes to a routine, standard, or team branch. Claude only. Cheap on the routine path, deep on the team one."
+entrypoint = "classify"
+workspace = "worktree"
+base_ref = "HEAD"
+max_steps = 34
+max_wall_seconds = 16200
+max_cost_usd = 25.0
+
+[workflows.auto_claude.nodes.classify]
+kind = "agent"
+agent = "planner"
+on_success = "routine_gate"
+on_failure = "failed"
+prompt = """
+Classify this T3 Code task so the team can be sized to it. Inspect only enough of
+the repository to judge its real blast radius; do not edit and do not solve it.
+<task>{{task}}</task>
+
+ROUTINE is bounded, well-specified work: docs or comments, mechanical tests or
+configuration, localized boilerplate, a small change inside an existing pattern,
+or a narrow bug with a known reproduction and no boundary risk. It is work that
+does not split into a behavior section and a verification section, and that
+touches one surface rather than several.
+
+CRITICAL means failure could cross a trust or durability boundary: auth,
+permissions, secrets, destructive behavior, data loss, the event-sourced store or
+a schema migration, checkpointing, concurrency, the websocket/relay/tunnel
+transport, provider adapter protocol changes, `packages/contracts` changes that
+every client follows, public compatibility, a large behavioral refactor, or a
+hard nondeterministic production bug. It also covers work whose shape is
+genuinely unclear, because that is what an architect is for.
+
+Everything else is STANDARD: ordinary features, contained bug fixes, frontend
+work, and bounded behavioral refactors.
+
+Return one short reason, then exactly one final line:
+ROUTE: ROUTINE
+or
+ROUTE: STANDARD
+or
+ROUTE: CRITICAL
+"""
+
+[workflows.auto_claude.nodes.routine_gate]
+kind = "gate"
+checks = [{ type = "output_matches", pattern = "(?m)^ROUTE: ROUTINE\\s*$" }]
+on_success = "routine_implement"
+on_failure = "standard_gate"
+
+[workflows.auto_claude.nodes.standard_gate]
+kind = "gate"
+# STANDARD is the only positive match, so an unparseable classification lands
+# on the critical route with its architect and frontier reviewer.
+checks = [{ type = "output_matches", pattern = "(?m)^ROUTE: STANDARD\\s*$" }]
+on_success = "std_plan"
+on_failure = "team_plan"
+
+# The routine route is deliberately unsectioned: a task classified as routine is
+# one that does not split into a behavior section and a verification section, so
+# mid-run supervision would buy a second certification of the same small diff.
+# The rest of the rule still holds — the cheap tier types, a stronger model
+# certifies, and that model makes the repair rather than handing the worker a
+# retry loop.
+[workflows.auto_claude.nodes.routine_implement]
+kind = "agent"
+agent = "haiku_worker"
+on_success = "routine_changed"
+on_failure = "failed"
+prompt = """
+Implement this bounded T3 Code task end to end:
+<task>{{task}}</task>
+Stay inside the established repository patterns, add focused tests when
+behavior changes, and validate the result with `vp test run <files>` for the
+tests you touched. A stronger model certifies this and repairs it itself if
+it fails, so keep the change small and coherent rather than ambitious.
+
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_claude.nodes.routine_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "routine_verify"
+on_failure = "failed"
+
+[workflows.auto_claude.nodes.routine_verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "routine_review"
+on_failure = "routine_repair"
+
+[workflows.auto_claude.nodes.routine_review]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "done"
+on_failure = "routine_repair"
+prompt = """
+Certify the tested diff for this bounded task:
+<task>{{task}}</task>
+Fail only for concrete correctness, contract, surface-coverage, state,
+recovery, or security defects. Optional polish is a pass.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.auto_claude.nodes.routine_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "routine_verify"
+on_failure = "failed"
+prompt = """
+You certified this bounded change and it failed. Repair it yourself:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+The cheaper pass already failed here, so fix the root cause properly rather
+than repeating its approach, and do not weaken useful checks.
+"""
+
+# The standard route is the same hierarchy one tier down from the critical one:
+# Sonnet decides and certifies without ever editing, and Haiku does the typing.
+# Opus is never loaded on this route.
+[workflows.auto_claude.nodes.std_plan]
+kind = "agent"
+agent = "sonnet_planner"
+on_success = "std_implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+The workers are small models, so they need instructions they can execute
+without inferring your intent.
+
+A crew of Haiku workers implements this, several at once, so split each section
+into numbered work units that can be built **concurrently**: every unit must own
+a disjoint set of files. Two units may read the same file, but exactly one unit
+may write it. When a change genuinely cannot be split that way, say so and give
+that section a single unit — a correct serial plan beats a parallel one that
+makes two workers edit the same function.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.auto_claude.nodes.std_implement_core]
+kind = "agent"
+agent = "haiku_worker"
+on_success = "std_core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Dispatch one Task subagent per SECTION A unit, launched in parallel in a single
+message, each told its goal, its WRITES and READS lists, its acceptance criteria,
+and that files outside its WRITES list belong to another worker running right
+now. One unit means one subagent, and you may implement that one yourself
+instead. Subagents do not launch dev servers. When they return you own the
+integration: read the files they actually wrote, reconcile the seams, and report
+per unit.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_claude.nodes.std_core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "std_supervise_core"
+on_failure = "failed"
+
+[workflows.auto_claude.nodes.std_supervise_core]
+kind = "judge"
+agent = "sonnet_lead"
+max_visits = 3
+on_success = "std_implement_tests"
+on_failure = "std_lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+The section was built by several subagents at once, each owning different
+files, so check it the same way: when the crew reported three or more units,
+dispatch a read-only Task subagent per unit, in parallel, then judge their
+reports yourself.
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.auto_claude.nodes.std_lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "std_supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.auto_claude.nodes.std_implement_tests]
+kind = "agent"
+agent = "haiku_worker"
+on_success = "std_supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Dispatch the SECTION B units the same way: one Task subagent per unit,
+launched in parallel in a single message, then integrate their work
+yourself. Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_claude.nodes.std_supervise_tests]
+kind = "judge"
+agent = "sonnet_lead"
+max_visits = 3
+on_success = "std_verify"
+on_failure = "std_lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.auto_claude.nodes.std_lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "std_supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.auto_claude.nodes.std_verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "std_review"
+on_failure = "std_lead_repair"
+
+[workflows.auto_claude.nodes.std_review]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "done"
+on_failure = "std_lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+A Sonnet work order, a Haiku crew implementation, two Sonnet section
+certifications, and the deterministic gate have already run.
+Fail only for concrete correctness, contract, surface-coverage, state,
+recovery, or security defects that survived all of them.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.auto_claude.nodes.std_lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "std_verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# The critical branch is the claude_team hierarchy, reached when the classifier
+# says the task crosses a boundary or cannot be sized confidently.
+[workflows.auto_claude.nodes.team_plan]
+kind = "agent"
+agent = "claude_architect"
+on_success = "team_implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+The workers are small models, so they need instructions they can execute
+without inferring your intent. Trace the trust, durability, contract,
+transport, and recovery boundaries this task touches, and state the
+invariants that must survive it.
+
+A crew of Haiku workers implements this, several at once, so split each section
+into numbered work units that can be built **concurrently**: every unit must own
+a disjoint set of files. Two units may read the same file, but exactly one unit
+may write it. When a change genuinely cannot be split that way, say so and give
+that section a single unit — a correct serial plan beats a parallel one that
+makes two workers edit the same function.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.auto_claude.nodes.team_implement_core]
+kind = "agent"
+agent = "haiku_worker"
+on_success = "team_core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Dispatch one Task subagent per SECTION A unit, launched in parallel in a single
+message, each told its goal, its WRITES and READS lists, its acceptance criteria,
+and that files outside its WRITES list belong to another worker running right
+now. One unit means one subagent, and you may implement that one yourself
+instead. Subagents do not launch dev servers. When they return you own the
+integration: read the files they actually wrote, reconcile the seams, and report
+per unit.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_claude.nodes.team_core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "team_supervise_core"
+on_failure = "failed"
+
+[workflows.auto_claude.nodes.team_supervise_core]
+kind = "judge"
+agent = "sonnet_lead"
+max_visits = 3
+on_success = "team_implement_tests"
+on_failure = "team_lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+The section was built by several subagents at once, each owning different
+files, so check it the same way: when the crew reported three or more units,
+dispatch a read-only Task subagent per unit, in parallel, then judge their
+reports yourself.
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.auto_claude.nodes.team_lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "team_supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.auto_claude.nodes.team_implement_tests]
+kind = "agent"
+agent = "haiku_worker"
+on_success = "team_supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Dispatch the SECTION B units the same way: one Task subagent per unit,
+launched in parallel in a single message, then integrate their work
+yourself. Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_claude.nodes.team_supervise_tests]
+kind = "judge"
+agent = "sonnet_lead"
+max_visits = 3
+on_success = "team_verify"
+on_failure = "team_lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.auto_claude.nodes.team_lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "team_supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.auto_claude.nodes.team_verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "team_review"
+on_failure = "team_lead_repair"
+
+[workflows.auto_claude.nodes.team_review]
+kind = "judge"
+agent = "claude_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "team_lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+An Opus work order, a Haiku crew implementation, two Sonnet section
+certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.auto_claude.nodes.team_lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "team_verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# Codex alone, on the same ladder as the Claude team: Sol decides and never
+# types, Luna does the bulk editing one section at a time, Terra leads the
+# sections and makes every repair, and Sol certifies the tested result.
+[workflows.auto_codex]
+description = "Codex end to end: plan, supervised sections, verify, review."
+entrypoint = "plan"
+workspace = "worktree"
+base_ref = "HEAD"
+# Two supervised sections plus a verify/review loop, each with its own
+# bounded repairs. The per-node max_visits are what stop this workflow.
+max_steps = 26
+max_wall_seconds = 14400
+max_cost_usd = 25.0
+
+[workflows.auto_codex.nodes.plan]
+kind = "agent"
+agent = "codex_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+Luna executes this, so name the exact files, symbols, contracts, and
+acceptance criteria rather than describing the outcome.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.auto_codex.nodes.implement_core]
+kind = "agent"
+agent = "codex_worker"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_codex.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.auto_codex.nodes.supervise_core]
+kind = "judge"
+agent = "terra_lead"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.auto_codex.nodes.lead_fix_core]
+kind = "agent"
+agent = "implementer"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.auto_codex.nodes.implement_tests]
+kind = "agent"
+agent = "codex_worker"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_codex.nodes.supervise_tests]
+kind = "judge"
+agent = "terra_lead"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.auto_codex.nodes.lead_fix_tests]
+kind = "agent"
+agent = "implementer"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.auto_codex.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.auto_codex.nodes.review]
+kind = "judge"
+agent = "codex_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+A Sol work order, a Luna implementation, two Terra section certifications,
+and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.auto_codex.nodes.lead_repair]
+kind = "agent"
+agent = "implementer"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# Cursor alone. Cursor exposes two tiers rather than three, so Auto is both the
+# deciding tier and the section lead while Composer does all the typing. The
+# architect, the section lead, and the final reviewer are three separate Auto
+# profiles, so the review is not the plan's own session agreeing with itself, and
+# the lead repairs with a second Composer profile rather than the worker's own.
+[workflows.auto_cursor]
+description = "Cursor end to end: Auto plans and reviews, Composer writes."
+entrypoint = "plan"
+workspace = "worktree"
+base_ref = "HEAD"
+# Two supervised sections plus a verify/review loop, each with its own
+# bounded repairs. The per-node max_visits are what stop this workflow.
+max_steps = 26
+max_wall_seconds = 14400
+max_cost_usd = 25.0
+
+[workflows.auto_cursor.nodes.plan]
+kind = "agent"
+agent = "cursor_auto_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+Cursor Composer executes this in one direct session, so keep each unit
+executable without subagents or model switching. Inspect only; do not edit.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.auto_cursor.nodes.implement_core]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker, running standard-speed Cursor Composer. Work directly:
+do not spawn subagents, switch models, or select a Fast variant. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_cursor.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.auto_cursor.nodes.supervise_core]
+kind = "judge"
+agent = "cursor_auto_lead"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.auto_cursor.nodes.lead_fix_core]
+kind = "agent"
+agent = "cursor_composer_lead"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.auto_cursor.nodes.implement_tests]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_cursor.nodes.supervise_tests]
+kind = "judge"
+agent = "cursor_auto_lead"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.auto_cursor.nodes.lead_fix_tests]
+kind = "agent"
+agent = "cursor_composer_lead"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.auto_cursor.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.auto_cursor.nodes.review]
+kind = "judge"
+agent = "cursor_auto_reviewer"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+An Auto work order, a Composer implementation, two Auto section
+certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.auto_cursor.nodes.lead_repair]
+kind = "agent"
+agent = "cursor_composer_lead"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# Claude + Cursor. Opus decides at both ends and never edits, Cursor Composer
+# does the typing, and a Sonnet section lead certifies each section and makes
+# every repair. Cursor Auto is a frontier tier, so it never writes here.
+[workflows.auto_claude_cursor]
+description = "Cursor Composer writes, Claude supervises and reviews."
+entrypoint = "plan"
+workspace = "worktree"
+base_ref = "HEAD"
+# Two supervised sections plus a verify/review loop, each with its own
+# bounded repairs. The per-node max_visits are what stop this workflow.
+max_steps = 26
+max_wall_seconds = 14400
+max_cost_usd = 20.0
+
+[workflows.auto_claude_cursor.nodes.plan]
+kind = "agent"
+agent = "claude_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+Cursor Composer executes this in one direct session, so keep each unit
+executable without subagents or model switching.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.auto_claude_cursor.nodes.implement_core]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker, running standard-speed Cursor Composer. Work directly:
+do not spawn subagents, switch models, or select a Fast variant. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_claude_cursor.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.auto_claude_cursor.nodes.supervise_core]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.auto_claude_cursor.nodes.lead_fix_core]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.auto_claude_cursor.nodes.implement_tests]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_claude_cursor.nodes.supervise_tests]
+kind = "judge"
+agent = "reviewer"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.auto_claude_cursor.nodes.lead_fix_tests]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.auto_claude_cursor.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.auto_claude_cursor.nodes.review]
+kind = "judge"
+agent = "claude_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+An Opus work order, a Cursor Composer implementation, two Sonnet section
+certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.auto_claude_cursor.nodes.lead_repair]
+kind = "agent"
+agent = "claude_implementer"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+# Codex + Cursor. Sol decides at both ends and never edits, Cursor Composer does
+# the typing, and a Terra section lead certifies each section and makes every
+# repair.
+[workflows.auto_codex_cursor]
+description = "Cursor Composer writes, Codex plans, supervises, and reviews."
+entrypoint = "plan"
+workspace = "worktree"
+base_ref = "HEAD"
+# Two supervised sections plus a verify/review loop, each with its own
+# bounded repairs. The per-node max_visits are what stop this workflow.
+max_steps = 26
+max_wall_seconds = 14400
+max_cost_usd = 25.0
+
+[workflows.auto_codex_cursor.nodes.plan]
+kind = "agent"
+agent = "codex_architect"
+on_success = "implement_core"
+on_failure = "failed"
+prompt = """
+You are the architect. A worker implements this task section by section, and a
+section lead certifies each section before the next one starts.
+<task>{task}</task>
+
+Cursor Composer executes this in one direct session, so keep each unit
+executable without subagents or model switching.
+
+Inspect the repository and produce the work order. Do not edit, and do not solve
+the task in prose — write instructions a cheaper model can execute without
+inferring your intent.
+
+If `graphify-out/graph.json` exists at the repo root, query it first —
+`graphify query "<question>"`, `graphify path "<A>" "<B>"`, `graphify explain
+"<symbol>"` — before falling back to Read/Glob/Grep; it is a persisted map of
+this codebase and answers most structural questions far cheaper than
+re-exploring the tree.
+
+T3 Code's most common defect is a change that works on the path someone tested
+and is missing everywhere else, so the work order is where that gets decided.
+Say, explicitly, which of these the change must reach and which it must not:
+entry points (chat view, Settings, command palette, keybinding), clients (web,
+desktop, mobile), provider adapters (Codex, Claude, Cursor, Grok, OpenCode —
+"not supported here" is a valid decision, but it has to be a decision), the
+typed contracts in `packages/contracts`, reverse states (a way in needs a way
+out), connection modes (local, remote/relay, tunnel), and the docs split by
+audience (`docs/user`, `docs/internals`, `docs/operations`).
+
+Keep orchestration pure and complexity at the adapter boundary. Fight scope
+creep: the smallest model that makes the correct behavior unsurprising wins, and
+machinery that merely looks architecturally impressive does not.
+
+Return exactly two sections, each as a numbered list of units:
+
+SECTION A — behavior
+A1. <goal> · WRITES: <files this unit may modify> · READS: <other files>
+    The symbols to change, the contracts and invariants that must hold, the
+    failure modes to handle, and the acceptance criteria the section lead will
+    check for A1.
+A2. ... (as many units as the work genuinely splits into)
+
+SECTION B — verification and consistency
+B1. <goal> · WRITES: ... · READS: ...
+    The focused tests to add or update, and the surfaces, callers, contracts, and
+    docs that must change with SECTION A for the result to be coherent.
+B2. ...
+"""
+
+[workflows.auto_codex_cursor.nodes.implement_core]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "core_changed"
+on_failure = "failed"
+prompt = """
+You are the worker, running standard-speed Cursor Composer. Work directly:
+do not spawn subagents, switch models, or select a Fast variant. Implement SECTION A of the work order and nothing else:
+<task>{{task}}</task>
+<work_order>{{last_output}}</work_order>
+
+Build the SECTION A units in order, honouring each unit's WRITES list so the
+sections stay separable, then report per unit what you built and anything that
+diverged from the work order.
+
+Do only SECTION A now. SECTION B is your next assignment in this same session, so
+keep the whole work order — it is not sent again. Follow it rather than
+redesigning it: a section lead certifies SECTION A before anything is built on
+it, and disagreements belong in your report, not in a different implementation.
+
+Inferred types over annotations; `any` is the enemy. Read
+`.repos/effect-smol/LLMS.md` before writing Effect code in `apps/server`, and
+never edit or import from `.repos/`.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_codex_cursor.nodes.core_changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "supervise_core"
+on_failure = "failed"
+
+[workflows.auto_codex_cursor.nodes.supervise_core]
+kind = "judge"
+agent = "terra_lead"
+max_visits = 3
+on_success = "implement_tests"
+on_failure = "lead_fix_core"
+prompt = """
+You are the section lead. Certify SECTION A before the team builds on it:
+<task>{{task}}</task>
+
+Read the current files, not just the diff. Check each unit against its own
+acceptance criteria, and check the seams between units — where one unit's
+assumption about another's file turned out to be wrong.
+
+Fail only for a concrete defect that SECTION B would inherit: wrong behavior, a
+missed invariant, a broken contract in `packages/contracts`, a surface the work
+order named and the change did not reach, a one-way door with no way out, a
+change that does not actually implement the work order — or a performance
+regression of the kind this repo's users notice: too much data over the
+websocket, a continuously repainting animation, a list that got expensive to
+render. Optional polish and missing tests are a pass — tests are SECTION B.
+Inspect only; do not edit.
+"""
+
+[workflows.auto_codex_cursor.nodes.lead_fix_core]
+kind = "agent"
+agent = "implementer"
+max_visits = 2
+on_success = "supervise_core"
+on_failure = "failed"
+prompt = """
+You are the section lead, now fixing the section yourself. SECTION A did not pass
+your certification:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Fix the concrete root cause of each finding and nothing else. The worker still
+owes SECTION B, so do not write its tests for it.
+"""
+
+[workflows.auto_codex_cursor.nodes.implement_tests]
+kind = "agent"
+agent = "cursor_composer"
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+Your SECTION A passed certification. Implement SECTION B of the same work order —
+you still have it, so it is not repeated here:
+<task>{{task}}</task>
+<section_lead_verdict>{{last_output}}</section_lead_verdict>
+
+Add the focused tests and make the surfaces, callers, contracts, and docs
+consistent with what SECTION A actually built, not with what the work order
+predicted it would build. If the section lead repaired your section, read the
+current files before you write tests against them.
+
+Backend behavior ships with focused tests for that behavior. The server is
+event-sourced and its async flows emit typed receipts: wait on receipts and
+worker drains, never on sleeps or polling — a test that needs a timeout to pass
+is wrong. Run the tests you touched with `vp test run <files>`; the repo-wide
+suite is the deterministic gate's job, not yours. Do not weaken existing checks.
+Do not commit, push, publish, deploy, message anyone, or contact external
+systems. Never start a server against `~/.t3/userdata` — that is the developer's
+live database and it is in use while you work. Never kill a process you did not
+spawn yourself, and never kill by pattern. Never set VITE_HTTP_URL or
+VITE_WS_URL.
+"""
+
+[workflows.auto_codex_cursor.nodes.supervise_tests]
+kind = "judge"
+agent = "terra_lead"
+max_visits = 3
+on_success = "verify"
+on_failure = "lead_fix_tests"
+prompt = """
+You are the section lead. Certify SECTION B before deterministic verification:
+<task>{{task}}</task>
+
+Fail only for tests that do not actually exercise the new behavior, assert the
+implementation instead of the requirement, wait on a sleep or a poll instead of a
+receipt, or leave a stated acceptance criterion uncovered — and for surfaces,
+callers, contracts, or docs left inconsistent with the change. Check every unit
+of the section, not the one that is easiest to read. Inspect only; do not edit.
+"""
+
+[workflows.auto_codex_cursor.nodes.lead_fix_tests]
+kind = "agent"
+agent = "implementer"
+max_visits = 2
+on_success = "supervise_tests"
+on_failure = "failed"
+prompt = """
+You are the section lead, fixing SECTION B yourself:
+<task>{{task}}</task>
+<findings>{{last_output}}</findings>
+Repair the coverage and consistency gaps you found without weakening existing
+checks or changing the certified SECTION A behavior.
+"""
+
+[workflows.auto_codex_cursor.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+max_visits = 4
+on_success = "review"
+on_failure = "lead_repair"
+
+[workflows.auto_codex_cursor.nodes.review]
+kind = "judge"
+agent = "codex_verifier"
+max_visits = 3
+on_success = "done"
+on_failure = "lead_repair"
+prompt = """
+You are the frontier reviewer and the last step before handoff. Certify the
+tested change for:
+<task>{{task}}</task>
+
+A Sol work order, a Cursor Composer implementation, two Terra section
+certifications, and the deterministic gate have already run.
+Spend this pass on what those could not see: defects at trust,
+durability, concurrency, migration, compatibility, and recovery
+boundaries; surfaces the change silently misses; and assumptions the
+earlier passes shared.
+
+The deterministic gate already passed here: `vp fmt --check`, `vp lint`,
+`vp run -r typecheck` across every workspace, and `vp run -r test`. Do not report a defect
+of a kind those would have caught — formatting, lint rules, type errors, or a
+failing unit test. They did not fire. Read the current file before claiming
+anything about it, and name the file and line you read. Report at most three
+blockers; optional polish is a pass. Inspect only; do not edit.
+"""
+
+[workflows.auto_codex_cursor.nodes.lead_repair]
+kind = "agent"
+agent = "implementer"
+max_visits = 3
+on_success = "verify"
+on_failure = "failed"
+prompt = """
+You are the section lead repairing the finished change after a deterministic or
+frontier-review failure:
+<task>{{task}}</task>
+<failure>{{last_output}}</failure>
+Fix the concrete root cause without weakening tests or the certified behavior,
+then return to deterministic verification.
+"""
+
+
+# --- quick_fix: the economy tier --------------------------------------------
+# One small writer, then the same deterministic verification every other
+# workflow in this file runs. No planner, no supervisor, no model review, and
+# no repair round — if the change does not pass on the first attempt, the run
+# fails and hands you the worktree rather than spending more to rescue it.
+#
+# This is the loop to reach for by default. `model_council` is roughly thirty
+# times its worst case; use that one when the task actually needs a council.
+[workflows.quick_fix]
+description = "One small writer certified by deterministic verification. No model review, no repair."
+entrypoint = "implement"
+workspace = "worktree"
+base_ref = "HEAD"
+max_steps = 3
+max_wall_seconds = 5400
+max_cost_usd = 2.0
+
+[workflows.quick_fix.nodes.implement]
+kind = "agent"
+agent = "quick_writer"
+on_success = "changed"
+on_failure = "failed"
+prompt = """
+Outcome: complete the following task in this repository.
+
+<task>
+{{task}}
+</task>
+
+Read the repository's durable instructions first. Make the smallest coherent
+change that fully satisfies the task, and match the conventions of the code you
+are editing. Do not commit, push, publish, or contact external systems.
+
+Formatting, lint, typecheck, and the test suite all run after you stop, and
+nothing reviews your work afterwards — the change either passes them or the run
+fails. Finish with a compact description of what you changed and any assumption
+you had to make.
+"""
+
+[workflows.quick_fix.nodes.changed]
+kind = "gate"
+checks = [{ type = "diff_not_empty" }]
+on_success = "verify"
+on_failure = "failed"
+
+[workflows.quick_fix.nodes.verify]
+kind = "command"
+command = [
+  "sh",
+  "-c",
+  'export PATH="$PWD/node_modules/.bin:$PATH"; vp fmt --check && vp lint --report-unused-disable-directives && vp run -r --concurrency-limit 2 typecheck && vp run -r test',
+]
+timeout_seconds = 3600
+on_success = "done"
+on_failure = "failed"

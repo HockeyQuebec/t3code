@@ -39,7 +39,7 @@ export function ContextWindowMeter(props: {
           <button
             type="button"
             className={cn(
-              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors",
+              "inline-flex h-7 cursor-pointer items-center justify-center gap-1 rounded-full border border-transparent px-1 text-muted-foreground outline-none transition-colors",
               "hover:bg-accent data-[pressed]:bg-accent",
               "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
             )}
@@ -76,6 +76,14 @@ export function ContextWindowMeter(props: {
                   className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
                 />
               </svg>
+            </span>
+            <span className="pr-0.5 text-[11px] tabular-nums text-muted-foreground/80">
+              {formatContextWindowTokens(usage.usedTokens)}
+              {usage.maxTokens !== null ? (
+                <span className="text-muted-foreground/50">
+                  /{formatContextWindowTokens(usage.maxTokens ?? null)}
+                </span>
+              ) : null}
             </span>
           </button>
         }

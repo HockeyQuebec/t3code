@@ -78,6 +78,7 @@ import {
   resolveTimelineMinimapTopPercent,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  TIMELINE_EMPTY_PLACEHOLDER_TEXT,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
@@ -183,6 +184,12 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onManualNavigation: () => void;
   hideEmptyPlaceholder?: boolean;
+  /**
+   * Replaces the generic "send a message" placeholder. A thread created by a
+   * "send later" has a story to tell about why it is empty, and only the caller
+   * knows it.
+   */
+  emptyPlaceholder?: ReactNode;
   topFadeEnabled?: boolean;
 }
 
@@ -218,6 +225,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
   onManualNavigation,
   hideEmptyPlaceholder = false,
+  emptyPlaceholder = null,
   topFadeEnabled = false,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -472,10 +480,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return null;
     }
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
-        </p>
+      <div className="flex h-full items-center justify-center px-4">
+        {emptyPlaceholder ?? (
+          <p className="text-sm text-muted-foreground/30">{TIMELINE_EMPTY_PLACEHOLDER_TEXT}</p>
+        )}
       </div>
     );
   }

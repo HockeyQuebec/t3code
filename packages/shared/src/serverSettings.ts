@@ -169,8 +169,19 @@ export function applyServerSettingsPatch(
           }
         : undefined;
   const next = deepMerge(current, patchForMerge);
+  // Harness role overrides are replaced wholesale. A deep merge can only ever
+  // add keys, so clearing an override would otherwise be impossible.
+  const harnessRoleOverrides = patch.providers?.harness?.roleOverrides;
   const nextWithReplacementsBase = {
     ...next,
+    ...(harnessRoleOverrides !== undefined
+      ? {
+          providers: {
+            ...next.providers,
+            harness: { ...next.providers.harness, roleOverrides: harnessRoleOverrides },
+          },
+        }
+      : {}),
     ...(backgroundActivity !== undefined
       ? {
           backgroundActivity: {

@@ -4,9 +4,14 @@
   "scripts": [
     {
       "name": "Setup Worktree",
-      "command": "vp i && ln -sf $T3CODE_PROJECT_ROOT/.env .env && ln -sf $T3CODE_PROJECT_ROOT/infra/relay/.env infra/relay/.env",
+      "command": "vp i && ln -sf $T3CODE_PROJECT_ROOT/.env .env && ln -sf $T3CODE_PROJECT_ROOT/infra/relay/.env infra/relay/.env && [ -d $T3CODE_PROJECT_ROOT/graphify-out ] && rsync -a --delete $T3CODE_PROJECT_ROOT/graphify-out/ graphify-out/ || true",
       "icon": "configure",
       "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Rebuild Server",
+      "command": "vp run --filter t3 build",
+      "icon": "build"
     }
   ]
 }

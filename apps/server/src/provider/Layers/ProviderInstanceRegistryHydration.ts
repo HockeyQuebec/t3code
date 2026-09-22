@@ -90,13 +90,15 @@ export const deriveProviderInstanceConfigMap = (
     // built-in driver kinds.
     const legacyKey = driver.driverKind as keyof ServerSettings["providers"];
     const legacyConfig = settings.providers[legacyKey];
-    if (legacyConfig === undefined) {
-      continue;
-    }
 
     merged[instanceId] = {
       driver: driver.driverKind,
-      config: legacyConfig,
+      // A driver added after the legacy `providers` struct was frozen has no
+      // mirror to read, and skipping it would mean it never gets an instance
+      // and so never appears anywhere in the UI. Its own defaults stand in,
+      // which is what makes "implement a driver, add it to BUILT_IN_DRIVERS"
+      // actually sufficient.
+      config: legacyConfig ?? driver.defaultConfig(),
     };
   }
 

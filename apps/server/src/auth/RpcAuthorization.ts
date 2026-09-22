@@ -44,6 +44,15 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetProcessResourceHistory]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetResourceTelemetryHistory]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRetryResourceTelemetry]: AuthOrchestrationOperateScope,
+  [WS_METHODS.serverGetSpendSummary]: AuthOrchestrationReadScope,
+  [WS_METHODS.serverGetHarnessCatalog]: AuthOrchestrationReadScope,
+  [WS_METHODS.serverGetDictationStatus]: AuthOrchestrationReadScope,
+  // Transcribing runs a CLI on the host and writes a temporary file, which is
+  // operating the machine rather than reading from it.
+  [WS_METHODS.serverTranscribeAudio]: AuthOrchestrationOperateScope,
+  // Queuing work to run later is operating the queue, not reading it.
+  [WS_METHODS.serverScheduleTurn]: AuthOrchestrationOperateScope,
+  [WS_METHODS.serverCancelScheduledTurn]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverSignalProcess]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.serverReportHostPowerState]: AuthOrchestrationOperateScope,
@@ -63,6 +72,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeVcsStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeResourceTelemetry]: AuthOrchestrationReadScope,
+  [WS_METHODS.subscribeAgentLimits]: AuthOrchestrationReadScope,
+  [WS_METHODS.subscribeScheduledTurns]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsRefreshStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsPull]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitRunStackedAction]: AuthOrchestrationOperateScope,

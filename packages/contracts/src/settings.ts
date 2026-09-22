@@ -10,6 +10,7 @@ import {
 } from "./model.ts";
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
+import { DICTATION_LIVE_SECS_RANGE, WhisperComputeType, WhisperModel } from "./dictation.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -359,6 +360,90 @@ export const ClaudeSettings = makeProviderSettingsSchema(
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
+/**
+ * Agent Harness runs a declared multi-step workflow across several providers
+ * instead of one prompt to one agent. Its "models" are the workflow names,
+ * which is why they are configuration here rather than probed from a CLI:
+ * workflows are declared per repository, and a provider's model list is fixed
+ * per instance.
+ */
+export const HarnessSettings = makeProviderSettingsSchema({
+  enabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
+  workflows: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed([
+        "evaluated_change",
+        "vibe_code",
+        "evaluated_review",
+        "dual_agent",
+        "composer_change",
+        "model_council",
+        "claude_team",
+        "auto_claude",
+        "auto_codex",
+        "auto_cursor",
+        "auto_claude_cursor",
+        "auto_codex_cursor",
+      ] as const),
+    ),
+    Schema.annotateKey({
+      title: "Workflows",
+      description:
+        "Workflow names offered in the model picker. Each must exist in the project's .agent-harness.toml.",
+    }),
+  ),
+  binaryPath: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "Binary path",
+      description: "Path to the agent-harness executable. Defaults to AGENT_HARNESS_BIN or PATH.",
+      providerSettingsForm: { placeholder: "agent-harness", clearWhenEmpty: "omit" },
+    }),
+  ),
+  harnessHome: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "Harness home",
+      description: "Where runs and worktrees are kept. Defaults to AGENT_HARNESS_HOME.",
+      providerSettingsForm: { placeholder: "~/.local/share/agent-harness", clearWhenEmpty: "omit" },
+    }),
+  ),
+  /**
+   * Per-role overrides, keyed by workflow then by role name.
+   *
+   * A workflow's roles are declared by the repository, but which provider and
+   * model actually runs each one is the user's call — that is the whole point
+   * of a control surface. Hidden from the generated settings form because it
+   * is edited through the harness panel, which knows the workflows and roles
+   * a project actually declares.
+   */
+  roleOverrides: Schema.Record(
+    TrimmedNonEmptyString,
+    Schema.Record(
+      TrimmedNonEmptyString,
+      Schema.Struct({
+        driver: Schema.optional(TrimmedNonEmptyString),
+        model: Schema.optional(TrimmedNonEmptyString),
+        reasoning: Schema.optional(TrimmedNonEmptyString),
+      }),
+    ),
+  ).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
+  allowDirty: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+    Schema.annotateKey({
+      title: "Allow dirty worktree",
+      description: "Let a workflow run in place when the repository has uncommitted changes.",
+    }),
+  ),
+});
+export type HarnessSettings = typeof HarnessSettings.Type;
+
 export const CursorSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
@@ -492,6 +577,76 @@ export const SourceControlWritingStyleSettings = Schema.Struct({
 });
 export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
 
+/**
+ * Speech typed into the composer by a Whisper CLI on this machine.
+ *
+ * Two knobs sit on top of the model choice, and both are worth understanding
+ * before touching the rest:
+ *
+ * - **speed** (`fast`) swaps beam search for greedy decoding, drops the weights
+ *   to int8, and lets the voice detector skip silence. The argv is the same
+ *   either way, so it works on whichever front-end is installed; the
+ *   quantisation and VAD flags are faster-whisper-only and are left off for
+ *   OpenAI's whisper.
+ * - **translate** uses whisper's `translate` task, which emits English whatever
+ *   was spoken. Combined with `live`, that is real-time translation: you talk,
+ *   English lands in the composer a few seconds behind you.
+ */
+export const DictationSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Any CLI taking `--model / --output_dir / --output_format` works. Left as a
+   * free string rather than a choice because a user may well point this at a
+   * wrapper script or a virtualenv's copy.
+   */
+  binary: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("whisper-ctranslate2")),
+  ),
+  model: WhisperModel.pipe(Schema.withDecodingDefault(Effect.succeed("small" as const))),
+  /** Empty auto-detects, which is what you want before speaking something else. */
+  language: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("en"))),
+  /**
+   * Worth roughly 15% on `small` and 25% on `medium`. The rest of a short
+   * dictation is process start and model load, which is why the model size is
+   * the dial that really moves.
+   */
+  fast: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  computeType: WhisperComputeType.pipe(Schema.withDecodingDefault(Effect.succeed("int8" as const))),
+  /** Whisper only translates *into* English — it is not a language pair. */
+  translate: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Transcribe while you are still talking: the recorder hands over a segment
+   * every `liveSegmentSeconds` and each one lands in the composer as it lands.
+   * Consecutive segments share a second of audio, and the resulting text is
+   * reconciled, so words clipped by a boundary are recovered.
+   */
+  live: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  liveSegmentSeconds: Schema.Number.pipe(
+    Schema.check(
+      Schema.isBetween({
+        minimum: DICTATION_LIVE_SECS_RANGE.minimum,
+        maximum: DICTATION_LIVE_SECS_RANGE.maximum,
+      }),
+    ),
+    Schema.withDecodingDefault(Effect.succeed(6)),
+  ),
+  /**
+   * A smaller model for live segments only, since those are the ones racing the
+   * speaker while the final tail can afford the main model. Empty uses `model`
+   * for both.
+   */
+  liveModel: Schema.Union([WhisperModel, Schema.Literal("")]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("" as const)),
+  ),
+  /**
+   * Hold the space bar to talk when the composer is not focused. Off by default
+   * because this is a text editor before it is a microphone, and a key that
+   * sometimes types and sometimes records has to be asked for.
+   */
+  spaceBarPushToTalk: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type DictationSettings = typeof DictationSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 export const DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL = Duration.minutes(5);
 
@@ -593,6 +748,7 @@ export const ServerSettings = Schema.Struct({
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    harness: HarnessSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -603,6 +759,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  dictation: DictationSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -696,6 +853,32 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+/**
+ * `roleOverrides` is a whole-map replacement rather than a deep merge: the UI
+ * sends the full record every edit, and clearing an override has to be able to
+ * remove a key, which a merge can never express.
+ */
+const HarnessSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(TrimmedString),
+  harnessHome: Schema.optionalKey(TrimmedString),
+  workflows: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  allowDirty: Schema.optionalKey(Schema.Boolean),
+  roleOverrides: Schema.optionalKey(
+    Schema.Record(
+      TrimmedNonEmptyString,
+      Schema.Record(
+        TrimmedNonEmptyString,
+        Schema.Struct({
+          driver: Schema.optional(TrimmedNonEmptyString),
+          model: Schema.optional(TrimmedNonEmptyString),
+          reasoning: Schema.optional(TrimmedNonEmptyString),
+        }),
+      ),
+    ),
+  ),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
@@ -729,6 +912,30 @@ export const ServerSettingsPatch = Schema.Struct({
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
     }),
   ),
+  dictation: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      binary: Schema.optionalKey(TrimmedNonEmptyString),
+      model: Schema.optionalKey(WhisperModel),
+      language: Schema.optionalKey(TrimmedString),
+      fast: Schema.optionalKey(Schema.Boolean),
+      computeType: Schema.optionalKey(WhisperComputeType),
+      translate: Schema.optionalKey(Schema.Boolean),
+      live: Schema.optionalKey(Schema.Boolean),
+      liveSegmentSeconds: Schema.optionalKey(
+        Schema.Number.pipe(
+          Schema.check(
+            Schema.isBetween({
+              minimum: DICTATION_LIVE_SECS_RANGE.minimum,
+              maximum: DICTATION_LIVE_SECS_RANGE.maximum,
+            }),
+          ),
+        ),
+      ),
+      liveModel: Schema.optionalKey(Schema.Union([WhisperModel, Schema.Literal("")])),
+      spaceBarPushToTalk: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
@@ -736,6 +943,7 @@ export const ServerSettingsPatch = Schema.Struct({
       cursor: Schema.optionalKey(CursorSettingsPatch),
       grok: Schema.optionalKey(GrokSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
+      harness: Schema.optionalKey(HarnessSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual
