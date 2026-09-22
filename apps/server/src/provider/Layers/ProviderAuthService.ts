@@ -62,34 +62,44 @@ export const makeProviderAuthService = Effect.gen(function* () {
       ),
     );
     const sessions = yield* providers.listSessions();
-    const threadIds = new Set(
-      bindings
-        .filter(
-          (binding) =>
-            binding.providerInstanceId !== undefined &&
-            affectedIds.has(binding.providerInstanceId) &&
-            binding.status !== "stopped",
-        )
-        .map((binding) => binding.threadId),
+    const sessionsToStop = new Map(
+      bindings.flatMap((session) =>
+        session.providerInstanceId !== undefined &&
+        affectedIds.has(session.providerInstanceId) &&
+        session.status !== "stopped"
+          ? [[session.threadId, session.providerInstanceId] as const]
+          : [],
+      ),
     );
     for (const session of sessions) {
       if (session.providerInstanceId !== undefined && affectedIds.has(session.providerInstanceId)) {
-        threadIds.add(session.threadId);
+        sessionsToStop.set(session.threadId, session.providerInstanceId);
       }
     }
     yield* Effect.forEach(
-      threadIds,
-      (threadId) =>
-        providers.stopSession({ threadId }).pipe(
-          Effect.mapError(
-            () =>
-              new ProviderSetupError({
-                instanceId,
-                operation: "stopSessions",
-                detail: "Could not stop all sessions for this provider. Try again.",
-              }),
-          ),
-        ),
+      sessionsToStop,
+      ([threadId, sessionInstanceId]) =>
+        Effect.gen(function* () {
+          if (sessionInstanceId !== instanceId) {
+            const current = yield* registry.getInstance(sessionInstanceId);
+            if (
+              !binding ||
+              current?.auth?.credentialBinding?.key !== binding.key ||
+              current.auth.credentialBinding.owner !== binding.owner
+            )
+              return;
+          }
+          yield* providers.stopSession({ threadId }).pipe(
+            Effect.mapError(
+              () =>
+                new ProviderSetupError({
+                  instanceId,
+                  operation: "stopSessions",
+                  detail: "Could not stop all sessions for this provider. Try again.",
+                }),
+            ),
+          );
+        }),
       { discard: true },
     );
     if (binding) {

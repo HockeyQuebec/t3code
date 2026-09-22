@@ -118,6 +118,7 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
     responds?: boolean;
     beforeLogout?: Effect.Effect<void>;
     beforeStop?: Effect.Effect<void>;
+    beforeListSessions?: Effect.Effect<void>;
     onLookup?: Effect.Effect<void>;
   } = {},
 ) {
@@ -243,9 +244,10 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
         }),
         Layer.mock(ProviderService)({
           listSessions: () =>
-            Effect.sync(() => {
+            Effect.gen(function* () {
               assert.isTrue(gateClosed);
               actions.push("list-sessions");
+              yield* input.beforeListSessions ?? Effect.void;
               return [...sessions.values()];
             }),
           stopSession: ({ threadId }) =>
@@ -864,6 +866,50 @@ it.effect.each([
       yield* Fiber.join(logout);
       assert.isFalse(replacementInvalidated);
       assert.isFalse(harness.sessions.has(ThreadId.make("shared-draining")));
+      assert.include(harness.actions, "native-logout");
+    }).pipe(Effect.scoped),
+);
+
+it.effect.each(["selection", "drain"] as const)(
+  "preserves replacement peer sessions when credentials change during session %s",
+  (phase) =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const proceed = yield* Deferred.make<void>();
+      const block = Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(proceed)),
+      );
+      const harness = yield* makeHarness({
+        sharedCredentials: true,
+        sessions: [
+          makeSession("target-draining"),
+          makeSession("peer-replacement", otherInstanceId),
+        ],
+        bindings: [
+          makeBinding("target-draining", "running"),
+          makeBinding("peer-persisted", "running", otherInstanceId),
+        ],
+        ...(phase === "selection" ? { beforeListSessions: block } : { beforeStop: block }),
+      });
+      const logout = yield* harness.service.logout({ instanceId }).pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      harness.replaceInstance(
+        makeInstance({
+          instanceId: otherInstanceId,
+          enabled: true,
+          auth: {
+            ...harness.auth,
+            credentialBinding: { owner: "provider", key: "replacement-credentials" },
+            invalidate: Effect.die("The replacement peer's credentials must not be invalidated."),
+          },
+        }),
+      );
+      yield* Deferred.succeed(proceed, undefined);
+      yield* Fiber.join(logout);
+      assert.isTrue(harness.sessions.has(ThreadId.make("peer-replacement")));
+      assert.notInclude(harness.actions, "stop:peer-replacement");
+      assert.notInclude(harness.actions, "stop:peer-persisted");
+      assert.isFalse(harness.sessions.has(ThreadId.make("target-draining")));
       assert.include(harness.actions, "native-logout");
     }).pipe(Effect.scoped),
 );
