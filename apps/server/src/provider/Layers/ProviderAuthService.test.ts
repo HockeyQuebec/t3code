@@ -112,6 +112,9 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
     directoryError?: ProviderSessionDirectoryPersistenceError;
     stopError?: ProviderServiceError;
     logoutError?: ProviderSetupError;
+    sharedCredentials?: boolean;
+    sharedBusy?: boolean;
+    responds?: boolean;
   } = {},
 ) {
   const actions: string[] = [];
@@ -138,6 +141,18 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
   });
 
   const auth: ProviderAuthController = {
+    ...(input.sharedCredentials
+      ? { credentialBinding: { owner: "provider" as const, key: "shared" } }
+      : {}),
+    ...(input.responds
+      ? {
+          respond: Effect.fn(function* (ownerSessionId, request) {
+            yield* checkOwner(ownerSessionId, request.flowId, "respond");
+            actions.push(`respond:${request.response.type}`);
+            return state;
+          }),
+        }
+      : {}),
     start: Effect.fn(function* (ownerSessionId, stopSessions) {
       gateClosed = true;
       actions.push("close-gate");
@@ -181,6 +196,21 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
   const instances = [
     makeInstance({ instanceId, enabled: input.enabled ?? true, auth }),
     makeInstance({ instanceId: unsupportedInstanceId, enabled: true }),
+    ...(input.sharedCredentials
+      ? [
+          makeInstance({
+            instanceId: otherInstanceId,
+            enabled: true,
+            auth: {
+              ...auth,
+              isChangingCredentials: Effect.succeed(input.sharedBusy ?? false),
+              invalidate: Effect.sync(() => {
+                actions.push("invalidate-shared");
+              }),
+            },
+          }),
+        ]
+      : []),
   ];
   const service = yield* makeProviderAuthService.pipe(
     Effect.provide(
@@ -188,6 +218,7 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
         Layer.mock(ProviderInstanceRegistry)({
           getInstance: (id) =>
             Effect.succeed(instances.find((instance) => instance.instanceId === id)),
+          listInstances: Effect.succeed(instances),
           subscribeChanges: PubSub.subscribe(registryChanges),
         }),
         Layer.mock(ProviderSessionDirectory)({
@@ -305,6 +336,56 @@ const observeAuth = Effect.fn("ProviderAuthService.test.observeAuth")(function* 
 });
 
 describe("ProviderAuthService", () => {
+  it.effect(
+    "stops sessions sharing credentials and invalidates their processes before logout",
+    () =>
+      Effect.gen(function* () {
+        const { service, actions, sessions } = yield* makeHarness({
+          sharedCredentials: true,
+          sessions: [
+            makeSession("target"),
+            makeSession("shared", otherInstanceId),
+            makeSession("unrelated", unsupportedInstanceId),
+          ],
+        });
+        yield* service.logout({ instanceId });
+        assert.deepStrictEqual([...sessions.keys()], [ThreadId.make("unrelated")]);
+        assert.isBelow(actions.indexOf("stop:shared"), actions.indexOf("invalidate-shared"));
+        assert.isBelow(actions.indexOf("invalidate-shared"), actions.indexOf("native-logout"));
+      }),
+  );
+  it.effect("rejects overlapping changes to a shared sign-in", () =>
+    Effect.gen(function* () {
+      const { service, actions } = yield* makeHarness({
+        sharedCredentials: true,
+        sharedBusy: true,
+      });
+      for (const task of [service.start({ instanceId }, owner), service.logout({ instanceId })]) {
+        const error = yield* task.pipe(Effect.flip);
+        assert.include(error.detail, "shared sign-in");
+      }
+      assert.deepStrictEqual(actions, []);
+    }),
+  );
+  it.effect("routes typed interactions to the flow owner and rejects unsupported controllers", () =>
+    Effect.gen(function* () {
+      const { service, actions } = yield* makeHarness({ responds: true });
+      yield* service.start({ instanceId }, owner);
+      const request = {
+        instanceId,
+        flowId,
+        interactionId: "consent",
+        response: { type: "browser" as const, action: "accept" as const },
+      };
+      const rejected = yield* service.respond(request, otherOwner).pipe(Effect.flip);
+      assert.strictEqual(rejected.operation, "respond");
+      yield* service.respond(request, owner);
+      assert.strictEqual(actions.at(-1), "respond:browser");
+      const unsupported = yield* makeHarness();
+      const error = yield* unsupported.service.respond(request, owner).pipe(Effect.flip);
+      assert.include(error.detail, "does not accept");
+    }),
+  );
   it.effect("stops routed sessions before sign-in, including for a disabled instance", () =>
     Effect.gen(function* () {
       const { service, actions, sessions } = yield* makeHarness({
