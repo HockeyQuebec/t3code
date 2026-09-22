@@ -115,6 +115,8 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
     sharedCredentials?: boolean;
     sharedBusy?: boolean;
     responds?: boolean;
+    beforeLogout?: Effect.Effect<void>;
+    onLookup?: Effect.Effect<void>;
   } = {},
 ) {
   const actions: string[] = [];
@@ -184,6 +186,7 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
       actions.push("close-gate");
       yield* stopSessions;
       if (input.logoutError) return yield* input.logoutError;
+      yield* input.beforeLogout ?? Effect.void;
       actions.push("native-logout");
       state = idle;
       flowOwner = undefined;
@@ -217,7 +220,11 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
       Layer.mergeAll(
         Layer.mock(ProviderInstanceRegistry)({
           getInstance: (id) =>
-            Effect.succeed(instances.find((instance) => instance.instanceId === id)),
+            Effect.gen(function* () {
+              const found = instances.find((instance) => instance.instanceId === id);
+              yield* input.onLookup ?? Effect.void;
+              return found;
+            }),
           listInstances: Effect.succeed(instances),
           subscribeChanges: PubSub.subscribe(registryChanges),
         }),
@@ -252,7 +259,16 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
       ),
     ),
   );
-  return { service, actions, sessions, bindings };
+  return {
+    service,
+    actions,
+    sessions,
+    bindings,
+    auth,
+    replaceAuth: (next: ProviderAuthController) => {
+      instances[0] = makeInstance({ instanceId, enabled: input.enabled ?? true, auth: next });
+    },
+  };
 });
 
 const makeStreamingController = Effect.fn("ProviderAuthService.test.makeStreamingController")(
@@ -687,3 +703,45 @@ describe("ProviderAuthService", () => {
     }),
   );
 });
+
+it.effect("queued logout prompts resolve the current controller after provider replacement", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const lookup = yield* Deferred.make<void>();
+    let observeLookup = false;
+    const harness = yield* makeHarness({
+      beforeLogout: Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+      ),
+      onLookup: Effect.suspend(() =>
+        observeLookup ? Deferred.succeed(lookup, undefined).pipe(Effect.asVoid) : Effect.void,
+      ),
+    });
+    const first = yield* harness.service.logout({ instanceId }).pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    observeLookup = true;
+    const queued = yield* harness.service
+      .tryHandlePromptCommand({ instanceId, text: "/logout", hasAttachments: false })
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(lookup);
+    let replacementLoggedOut = false;
+    harness.replaceAuth({
+      ...harness.auth,
+      logout: (stopSessions) =>
+        stopSessions.pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              replacementLoggedOut = true;
+              return idleAuthState;
+            }),
+          ),
+        ),
+    });
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(first);
+    assert.isTrue(yield* Fiber.join(queued));
+    assert.isTrue(replacementLoggedOut);
+    assert.strictEqual(harness.actions.filter((action) => action === "native-logout").length, 1);
+  }).pipe(Effect.scoped),
+);

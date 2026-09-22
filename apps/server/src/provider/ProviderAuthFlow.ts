@@ -412,14 +412,18 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
           yield* stopSessions.pipe(Effect.ensuring(stopOwnedSessions));
           yield* options.logout;
         }).pipe(Effect.exit);
-        operation = "idle";
         const state: ProviderAuthState = {
           ...empty,
           methods: snapshot.value.state.methods ?? [],
           phase: Exit.isSuccess(result) ? "idle" : "failed",
           message: Exit.isSuccess(result) ? "Signed out." : "Could not sign out. Try again.",
         };
-        yield* SubscriptionRef.set(snapshot, { owner: null, state });
+        yield* lock.withPermit(
+          Effect.gen(function* () {
+            yield* SubscriptionRef.set(snapshot, { owner: null, state });
+            operation = "idle";
+          }),
+        );
         if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause);
         return state;
       }).pipe(Effect.uninterruptible),

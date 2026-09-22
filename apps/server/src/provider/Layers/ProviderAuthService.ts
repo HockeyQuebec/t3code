@@ -190,7 +190,8 @@ export const makeProviderAuthService = Effect.gen(function* () {
         yield* credentialChanges.withPermit(
           Effect.gen(function* () {
             yield* checkSharedBinding(input.instanceId, "logout");
-            yield* instance.auth!.logout(stopSessions(input.instanceId));
+            const auth = yield* getController(input.instanceId, "logout");
+            yield* auth.logout(stopSessions(input.instanceId));
           }),
         );
         return true;
