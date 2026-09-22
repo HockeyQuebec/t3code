@@ -53,7 +53,7 @@ interface Flow {
 }
 
 /** Adapters do login and credential handling; this owns client consent and flow lifetime. */
-export const makeProviderAuthFlow = Effect.fn("makeProviderAuthFlow")(function* (options: {
+export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
   readonly instanceId: ProviderInstanceId;
   readonly credentialBinding: NonNullable<ProviderAuthController["credentialBinding"]>;
   readonly methods: Effect.Effect<ReadonlyArray<ProviderAuthMethod>, ProviderSetupError>;

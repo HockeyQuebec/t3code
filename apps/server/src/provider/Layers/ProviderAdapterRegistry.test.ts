@@ -14,7 +14,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 
-import { makeProviderAuthFlow } from "../ProviderAuthFlow.ts";
+import * as ProviderAuthFlow from "../ProviderAuthFlow.ts";
 
 import type * as ClaudeAdapter from "../Services/ClaudeAdapter.ts";
 import type * as CodexAdapter from "../Services/CodexAdapter.ts";
@@ -196,7 +196,7 @@ it.effect("blocks shared credential session startup and preserves guarded adapte
   Effect.gen(function* () {
     const target = fakeInstances[0]!;
     const peer = fakeInstances[1]!;
-    const auth = yield* makeProviderAuthFlow({
+    const auth = yield* ProviderAuthFlow.make({
       instanceId: target.instanceId,
       credentialBinding: { owner: "t3", key: "shared-auth" },
       methods: Effect.succeed([
@@ -205,7 +205,7 @@ it.effect("blocks shared credential session startup and preserves guarded adapte
       authenticate: () => Effect.never,
       logout: Effect.void,
     });
-    const peerAuth = yield* makeProviderAuthFlow({
+    const peerAuth = yield* ProviderAuthFlow.make({
       instanceId: peer.instanceId,
       credentialBinding: { owner: "t3", key: "shared-auth" },
       methods: Effect.succeed([]),

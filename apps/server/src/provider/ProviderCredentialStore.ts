@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 /** A provider binding stores opaque bytes; only its adapter decodes or refreshes them. */
-export const makeProviderCredentialStore = Effect.fn("makeProviderCredentialStore")(function* (
+export const make = Effect.fn("ProviderCredentialStore.make")(function* (
   driver: string,
   bindingId: string,
 ) {

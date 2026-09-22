@@ -16,7 +16,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import { makeProviderAuthFlow } from "./ProviderAuthFlow.ts";
+import * as ProviderAuthFlow from "./ProviderAuthFlow.ts";
 
 const instanceId = ProviderInstanceId.make("auth-flow-test");
 const method = { id: "browser", name: "Browser", description: null, type: "agent" as const };
@@ -24,7 +24,7 @@ const method = { id: "browser", name: "Browser", description: null, type: "agent
 it.effect("distinguishes pending method discovery from an agent with no sign-in methods", () =>
   Effect.gen(function* () {
     const discovered = yield* Deferred.make<ReadonlyArray<typeof method>>();
-    const controller = yield* makeProviderAuthFlow({
+    const controller = yield* ProviderAuthFlow.make({
       instanceId,
       credentialBinding: { owner: "provider", key: "shared-agent" },
       methods: Deferred.await(discovered),
@@ -50,7 +50,7 @@ const makeHarness = Effect.gen(function* () {
   const verified = yield* Deferred.make<void>();
   const started = yield* Deferred.make<void>();
   let attempts = 0;
-  const controller = yield* makeProviderAuthFlow({
+  const controller = yield* ProviderAuthFlow.make({
     instanceId,
     credentialBinding: { owner: "provider", key: "shared-agent" },
     methods: Effect.succeed([method]),
@@ -212,7 +212,7 @@ it.effect.each([
   ({ interaction, response }) =>
     Effect.gen(function* () {
       const received = yield* Deferred.make<ProviderAuthResponse>();
-      const controller = yield* makeProviderAuthFlow({
+      const controller = yield* ProviderAuthFlow.make({
         instanceId,
         credentialBinding: { owner: "t3", key: "binding" },
         methods: Effect.succeed([method]),
@@ -258,7 +258,7 @@ it.effect.each([
 
 it.effect("shows a device code only to its owner without treating it as authenticated", () =>
   Effect.gen(function* () {
-    const controller = yield* makeProviderAuthFlow({
+    const controller = yield* ProviderAuthFlow.make({
       instanceId,
       credentialBinding: { owner: "provider", key: "device" },
       methods: Effect.succeed([method]),
@@ -307,7 +307,7 @@ it.effect.each([
   },
 ])("publishes only safe authentication failure text %#", ({ failure, message }) =>
   Effect.gen(function* () {
-    const controller = yield* makeProviderAuthFlow({
+    const controller = yield* ProviderAuthFlow.make({
       instanceId,
       credentialBinding: { owner: "t3", key: "failure" },
       methods: Effect.succeed([method]),
@@ -331,7 +331,7 @@ const makeBlockingResponseHarness = Effect.gen(function* () {
   const cleanupFinished = yield* Deferred.make<void>();
   const authenticationFinished = yield* Deferred.make<void>();
   let responses = 0;
-  const controller = yield* makeProviderAuthFlow({
+  const controller = yield* ProviderAuthFlow.make({
     instanceId,
     credentialBinding: { owner: "t3", key: "blocked-response" },
     methods: Effect.succeed([method]),
