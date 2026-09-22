@@ -117,6 +117,7 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
     sharedBusyEffect?: Effect.Effect<boolean>;
     responds?: boolean;
     beforeLogout?: Effect.Effect<void>;
+    beforeStop?: Effect.Effect<void>;
     onLookup?: Effect.Effect<void>;
   } = {},
 ) {
@@ -248,14 +249,14 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
               return [...sessions.values()];
             }),
           stopSession: ({ threadId }) =>
-            Effect.suspend(() => {
+            Effect.gen(function* () {
               assert.isTrue(gateClosed);
               actions.push(`stop:${threadId}`);
-              if (input.stopError) return Effect.fail(input.stopError);
+              yield* input.beforeStop ?? Effect.void;
+              if (input.stopError) return yield* input.stopError;
               sessions.delete(threadId);
               const binding = bindings.get(threadId);
               if (binding) bindings.set(threadId, { ...binding, status: "stopped" });
-              return Effect.void;
             }),
         }),
       ),
@@ -268,6 +269,13 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
     bindings,
     auth,
     addInstance: (instance: ProviderInstance) => instances.push(instance),
+    replaceInstance: (replacement: ProviderInstance) => {
+      const index = instances.findIndex(
+        (instance) => instance.instanceId === replacement.instanceId,
+      );
+      assert.isAtLeast(index, 0);
+      instances[index] = replacement;
+    },
     replaceAuth: (next: ProviderAuthController) => {
       instances[0] = makeInstance({ instanceId, enabled: input.enabled ?? true, auth: next });
     },
@@ -817,5 +825,45 @@ it.effect.each(["start", "logout", "prompt"] as const)(
       const blocked = yield* Effect.flip(harness.service.logout({ instanceId }));
       assert.include(blocked.detail, "shared sign-in");
       assert.equal(replacementMutations, 0);
+    }).pipe(Effect.scoped),
+);
+
+it.effect.each([
+  { owner: "provider" as const, key: "different-binding" },
+  { owner: "t3" as const, key: "shared" },
+])(
+  "does not invalidate a peer that switches credential binding during session draining %#",
+  (binding) =>
+    Effect.gen(function* () {
+      const draining = yield* Deferred.make<void>();
+      const continueDrain = yield* Deferred.make<void>();
+      const harness = yield* makeHarness({
+        sharedCredentials: true,
+        sessions: [makeSession("shared-draining", otherInstanceId)],
+        beforeStop: Deferred.succeed(draining, undefined).pipe(
+          Effect.andThen(Deferred.await(continueDrain)),
+        ),
+      });
+      const logout = yield* harness.service.logout({ instanceId }).pipe(Effect.forkChild);
+      yield* Deferred.await(draining);
+      let replacementInvalidated = false;
+      harness.replaceInstance(
+        makeInstance({
+          instanceId: otherInstanceId,
+          enabled: true,
+          auth: {
+            ...harness.auth,
+            credentialBinding: binding,
+            invalidate: Effect.sync(() => {
+              replacementInvalidated = true;
+            }),
+          },
+        }),
+      );
+      yield* Deferred.succeed(continueDrain, undefined);
+      yield* Fiber.join(logout);
+      assert.isFalse(replacementInvalidated);
+      assert.isFalse(harness.sessions.has(ThreadId.make("shared-draining")));
+      assert.include(harness.actions, "native-logout");
     }).pipe(Effect.scoped),
 );

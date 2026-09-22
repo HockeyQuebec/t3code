@@ -4,10 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
-import {
-  ProviderAuthService,
-  type ProviderAuthController,
-} from "../Services/ProviderAuthService.ts";
+import * as ProviderAuthService from "../Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
@@ -40,7 +37,7 @@ export const makeProviderAuthService = Effect.gen(function* () {
   // when invalidating credentials for sign-in or sign-out.
   const stopSessions = Effect.fn("ProviderAuthService.stopSessions")(function* (
     instanceId: ProviderInstanceId,
-    binding: ProviderAuthController["credentialBinding"],
+    binding: ProviderAuthService.ProviderAuthController["credentialBinding"],
   ) {
     const affectedIds = new Set([
       instanceId,
@@ -98,7 +95,11 @@ export const makeProviderAuthService = Effect.gen(function* () {
     if (binding) {
       yield* Effect.forEach(
         (yield* registry.listInstances).filter(
-          (instance) => instance.instanceId !== instanceId && affectedIds.has(instance.instanceId),
+          (instance) =>
+            instance.instanceId !== instanceId &&
+            affectedIds.has(instance.instanceId) &&
+            instance.auth?.credentialBinding?.key === binding.key &&
+            instance.auth.credentialBinding.owner === binding.owner,
         ),
         (instance) => instance.auth?.invalidate ?? Effect.void,
         { discard: true },
@@ -109,7 +110,7 @@ export const makeProviderAuthService = Effect.gen(function* () {
   const checkSharedBinding = Effect.fnUntraced(function* (
     instanceId: ProviderInstanceId,
     operation: "start" | "logout",
-    auth: ProviderAuthController,
+    auth: ProviderAuthService.ProviderAuthController,
   ) {
     const binding = auth.credentialBinding;
     if (!binding) return;
@@ -132,7 +133,7 @@ export const makeProviderAuthService = Effect.gen(function* () {
     }
   });
 
-  return ProviderAuthService.of({
+  return ProviderAuthService.ProviderAuthService.of({
     start: Effect.fn("ProviderAuthService.start")(function* (input, ownerSessionId) {
       return yield* credentialChanges.withPermit(
         Effect.gen(function* () {
@@ -208,4 +209,7 @@ export const makeProviderAuthService = Effect.gen(function* () {
   });
 });
 
-export const ProviderAuthServiceLive = Layer.effect(ProviderAuthService, makeProviderAuthService);
+export const ProviderAuthServiceLive = Layer.effect(
+  ProviderAuthService.ProviderAuthService,
+  makeProviderAuthService,
+);
