@@ -114,6 +114,7 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
     logoutError?: ProviderSetupError;
     sharedCredentials?: boolean;
     sharedBusy?: boolean;
+    sharedBusyEffect?: Effect.Effect<boolean>;
     responds?: boolean;
     beforeLogout?: Effect.Effect<void>;
     onLookup?: Effect.Effect<void>;
@@ -206,7 +207,8 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
             enabled: true,
             auth: {
               ...auth,
-              isChangingCredentials: Effect.succeed(input.sharedBusy ?? false),
+              isChangingCredentials:
+                input.sharedBusyEffect ?? Effect.succeed(input.sharedBusy ?? false),
               invalidate: Effect.sync(() => {
                 actions.push("invalidate-shared");
               }),
@@ -265,6 +267,7 @@ const makeHarness = Effect.fn("ProviderAuthService.test.makeHarness")(function* 
     sessions,
     bindings,
     auth,
+    addInstance: (instance: ProviderInstance) => instances.push(instance),
     replaceAuth: (next: ProviderAuthController) => {
       instances[0] = makeInstance({ instanceId, enabled: input.enabled ?? true, auth: next });
     },
@@ -744,4 +747,75 @@ it.effect("queued logout prompts resolve the current controller after provider r
     assert.isTrue(replacementLoggedOut);
     assert.strictEqual(harness.actions.filter((action) => action === "native-logout").length, 1);
   }).pipe(Effect.scoped),
+);
+
+it.effect.each(["start", "logout", "prompt"] as const)(
+  "%s uses the same credential controller for shared exclusion and mutation during replacement",
+  (action) =>
+    Effect.gen(function* () {
+      const checked = yield* Deferred.make<void>();
+      const continueCheck = yield* Deferred.make<void>();
+      const replacementPeerId = ProviderInstanceId.make("replacement-shared-peer");
+      const harness = yield* makeHarness({
+        sharedCredentials: true,
+        sharedBusyEffect: Deferred.succeed(checked, undefined).pipe(
+          Effect.andThen(Deferred.await(continueCheck)),
+          Effect.as(false),
+        ),
+        sessions: [
+          makeSession("old-shared", otherInstanceId),
+          makeSession("replacement-shared", replacementPeerId),
+        ],
+      });
+      harness.addInstance(
+        makeInstance({
+          instanceId: replacementPeerId,
+          enabled: true,
+          auth: {
+            ...harness.auth,
+            credentialBinding: { owner: "provider", key: "replacement-binding" },
+            isChangingCredentials: Effect.succeed(true),
+            invalidate: Effect.die(
+              "The unrelated replacement credential binding must stay intact.",
+            ),
+          },
+        }),
+      );
+      const operation =
+        action === "start"
+          ? harness.service.start({ instanceId }, owner)
+          : action === "logout"
+            ? harness.service.logout({ instanceId })
+            : harness.service.tryHandlePromptCommand({
+                instanceId,
+                text: "/logout",
+                hasAttachments: false,
+              });
+      const running = yield* operation.pipe(Effect.forkChild);
+      yield* Deferred.await(checked);
+      let replacementMutations = 0;
+      harness.replaceAuth({
+        ...harness.auth,
+        credentialBinding: { owner: "provider", key: "replacement-binding" },
+        start: () =>
+          Effect.sync(() => {
+            replacementMutations++;
+            return waitingAuthState;
+          }),
+        logout: () =>
+          Effect.sync(() => {
+            replacementMutations++;
+            return idleAuthState;
+          }),
+      });
+      yield* Deferred.succeed(continueCheck, undefined);
+      yield* Fiber.join(running);
+      assert.equal(replacementMutations, 0);
+      assert.include(harness.actions, action === "start" ? "start-sign-in" : "native-logout");
+      assert.isFalse(harness.sessions.has(ThreadId.make("old-shared")));
+      assert.isTrue(harness.sessions.has(ThreadId.make("replacement-shared")));
+      const blocked = yield* Effect.flip(harness.service.logout({ instanceId }));
+      assert.include(blocked.detail, "shared sign-in");
+      assert.equal(replacementMutations, 0);
+    }).pipe(Effect.scoped),
 );
