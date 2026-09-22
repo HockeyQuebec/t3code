@@ -7,6 +7,9 @@ import {
 import { it, assert, vi } from "@effect/vitest";
 
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
@@ -258,5 +261,25 @@ it.effect("blocks shared credential session startup and preserves guarded adapte
       session,
     );
     assert.strictEqual(start.mock.calls.length, 1);
+    const entered = yield* Deferred.make<void>();
+    const stopped = yield* Deferred.make<void>();
+    start.mockImplementation(() =>
+      Effect.gen(function* () {
+        yield* Deferred.succeed(entered, undefined);
+        return yield* Effect.never;
+      }).pipe(Effect.ensuring(Deferred.succeed(stopped, undefined))),
+    );
+    const startup = yield* guarded
+      .startSession({
+        threadId: session.threadId,
+        providerInstanceId: peer.instanceId,
+        runtimeMode: "approval-required",
+      })
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    // Signing out through another instance must drain its peer's startup too.
+    yield* auth.logout(Effect.void);
+    yield* Deferred.await(stopped);
+    assert.strictEqual(Exit.isFailure(yield* Fiber.await(startup)), true);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

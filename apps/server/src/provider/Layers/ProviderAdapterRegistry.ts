@@ -15,10 +15,11 @@
  *
  * @module ProviderAdapterRegistryLive
  */
-import { ProviderInstanceId, ProviderSetupError } from "@t3tools/contracts";
+import { ProviderInstanceId, ProviderSetupError, type ProviderSession } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
+import type * as Scope from "effect/Scope";
 
 import {
   ProviderUnsupportedError,
@@ -67,11 +68,21 @@ const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(fun
               });
             }
           }
-          return yield* instance.adapter.startSession(input);
+          let admitted: Effect.Effect<
+            ProviderSession,
+            ProviderAdapterError | ProviderSetupError,
+            Scope.Scope
+          > = instance.adapter.startSession(input);
+          // Every shared owner holds the startup scope. A credential change
+          // interrupts admitted startup before it can escape the session drain.
+          for (const peer of related) {
+            if (peer.auth?.withAccess) admitted = peer.auth.withAccess(admitted);
+          }
+          return yield* Effect.scoped(admitted);
         });
         // Adapters own established session lifetimes. This scope guards startup;
         // ProviderAuthService drains routed sessions before changing credentials.
-        return (auth.withAccess ? Effect.scoped(auth.withAccess(start)) : start).pipe(
+        return start.pipe(
           Effect.mapError((cause) =>
             isSetupError(cause)
               ? new ProviderAdapterValidationError({

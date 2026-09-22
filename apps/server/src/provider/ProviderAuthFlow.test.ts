@@ -7,6 +7,9 @@ import {
   type ProviderAuthResponse,
   type ProviderAuthState,
 } from "@t3tools/contracts";
+import * as Fiber from "effect/Fiber";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -318,5 +321,156 @@ it.effect.each([
       Effect.map(Option.getOrThrow),
     );
     assert.strictEqual(failed.message, message);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+const makeBlockingResponseHarness = Effect.gen(function* () {
+  const entered = yield* Deferred.make<void>();
+  const cleanupStarted = yield* Deferred.make<void>();
+  const cleanupReleased = yield* Deferred.make<void>();
+  const cleanupFinished = yield* Deferred.make<void>();
+  const authenticationFinished = yield* Deferred.make<void>();
+  let responses = 0;
+  const controller = yield* makeProviderAuthFlow({
+    instanceId,
+    credentialBinding: { owner: "t3", key: "blocked-response" },
+    methods: Effect.succeed([method]),
+    authenticate: (_, context) =>
+      Effect.gen(function* () {
+        yield* context.setInteraction(
+          {
+            type: "browser",
+            id: "blocked",
+            url: "https://example.com/login",
+            requiresConsent: true,
+          },
+          () =>
+            Effect.gen(function* () {
+              responses++;
+              yield* Deferred.succeed(entered, undefined);
+              return yield* Effect.never;
+            }).pipe(
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  yield* Deferred.succeed(cleanupStarted, undefined);
+                  yield* Deferred.await(cleanupReleased);
+                  yield* Deferred.succeed(cleanupFinished, undefined);
+                }),
+              ),
+            ),
+        );
+        yield* Deferred.await(authenticationFinished);
+      }),
+    logout: Effect.void,
+  });
+  const start = yield* controller.start("owner");
+  yield* controller.subscribe("owner").pipe(
+    Stream.filter((state) => state.phase === "waiting"),
+    Stream.runHead,
+  );
+  const input = {
+    instanceId,
+    flowId: start.flowId!,
+    interactionId: "blocked",
+    response: { type: "browser" as const, action: "accept" as const },
+  };
+  const response = yield* controller.respond!("owner", input).pipe(Effect.exit, Effect.forkChild);
+  yield* Deferred.await(entered);
+  return {
+    controller,
+    input,
+    response,
+    cleanupStarted,
+    cleanupReleased,
+    cleanupFinished,
+    authenticationFinished,
+    responses: () => responses,
+  };
+});
+
+it.effect.each(["cancel", "logout"] as const)(
+  "%s interrupts and awaits a blocked adapter response before admitting another sign-in",
+  (action) =>
+    Effect.gen(function* () {
+      const harness = yield* makeBlockingResponseHarness;
+      const duplicate = yield* Effect.flip(harness.controller.respond!("owner", harness.input));
+      assert.include(duplicate.detail, "already in progress");
+      assert.equal(harness.responses(), 1);
+      const stopping = yield* (
+        action === "cancel"
+          ? harness.controller.cancel("owner", harness.input.flowId)
+          : harness.controller.logout(Effect.void)
+      ).pipe(Effect.forkChild);
+      yield* Deferred.await(harness.cleanupStarted);
+      assert.isTrue(yield* harness.controller.isChangingCredentials!);
+      assert.isUndefined(stopping.pollUnsafe());
+      const premature = yield* Effect.flip(harness.controller.start("other"));
+      assert.include(premature.detail, "in progress");
+      yield* Deferred.succeed(harness.cleanupReleased, undefined);
+      yield* Fiber.join(stopping);
+      assert.isTrue(yield* Deferred.isDone(harness.cleanupFinished));
+      assert.isTrue(Exit.isFailure(yield* Fiber.join(harness.response)));
+      assert.isFalse(yield* harness.controller.isChangingCredentials!);
+      assert.notEqual((yield* harness.controller.start("other")).flowId, harness.input.flowId);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("timeout interrupts and drains a blocked response before publishing failure", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeBlockingResponseHarness;
+    yield* TestClock.adjust(300_001);
+    yield* Deferred.await(harness.cleanupStarted);
+    assert.isTrue(yield* harness.controller.isChangingCredentials!);
+    const duringCleanup = yield* harness.controller
+      .subscribe("owner")
+      .pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+    assert.notEqual(duringCleanup.phase, "failed");
+    yield* Deferred.succeed(harness.cleanupReleased, undefined);
+    const failed = yield* harness.controller.subscribe("owner").pipe(
+      Stream.filter((state) => state.phase === "failed"),
+      Stream.runHead,
+      Effect.map(Option.getOrThrow),
+    );
+    assert.include(failed.message ?? "", "expired");
+    assert.isTrue(yield* Deferred.isDone(harness.cleanupFinished));
+    assert.isTrue(Exit.isFailure(yield* Fiber.join(harness.response)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "successful authentication drains a still-running response before admitting provider access",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeBlockingResponseHarness;
+      yield* Deferred.succeed(harness.authenticationFinished, undefined);
+      yield* Deferred.await(harness.cleanupStarted);
+      const denied = yield* Effect.flip(harness.controller.withAccess!(Effect.void));
+      assert.include(denied.detail, "changing");
+      yield* Deferred.succeed(harness.cleanupReleased, undefined);
+      const succeeded = yield* harness.controller.subscribe("owner").pipe(
+        Stream.filter((state) => state.phase === "succeeded"),
+        Stream.runHead,
+        Effect.map(Option.getOrThrow),
+      );
+      assert.equal(succeeded.phase, "succeeded");
+      assert.isTrue(yield* Deferred.isDone(harness.cleanupFinished));
+      assert.isTrue(Exit.isFailure(yield* Fiber.join(harness.response)));
+      yield* harness.controller.withAccess!(Effect.void);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("closing the controller scope interrupts and drains its adapter response", () =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    const harness = yield* makeBlockingResponseHarness.pipe(
+      Effect.provideService(Scope.Scope, scope),
+    );
+    const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild);
+    yield* Deferred.await(harness.cleanupStarted);
+    assert.isUndefined(closing.pollUnsafe());
+    yield* Deferred.succeed(harness.cleanupReleased, undefined);
+    yield* Fiber.join(closing);
+    assert.isTrue(yield* Deferred.isDone(harness.cleanupFinished));
+    assert.isTrue(Exit.isFailure(yield* Fiber.join(harness.response)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
