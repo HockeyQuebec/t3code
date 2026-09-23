@@ -1117,6 +1117,28 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
+/**
+ * What the desktop menu bar item shows. The renderer owns thread state, so it
+ * formats everything here and the main process only draws it. Each item's
+ * `action` comes back to the renderer through `onMenuAction` when clicked.
+ */
+export const DesktopMenuBarItemSchema = Schema.Struct({
+  label: Schema.String.check(Schema.isMaxLength(200)),
+  action: Schema.NullOr(Schema.String.check(Schema.isMaxLength(512))),
+});
+export const DesktopMenuBarStateSchema = Schema.Struct({
+  title: Schema.String.check(Schema.isMaxLength(64)),
+  attention: Schema.Boolean,
+  tooltip: Schema.String.check(Schema.isMaxLength(512)),
+  sections: Schema.Array(
+    Schema.Struct({
+      label: Schema.String.check(Schema.isMaxLength(200)),
+      items: Schema.Array(DesktopMenuBarItemSchema).check(Schema.isMaxLength(50)),
+    }),
+  ).check(Schema.isMaxLength(10)),
+});
+export type DesktopMenuBarState = typeof DesktopMenuBarStateSchema.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   /** Absolute path of a dropped or picked file; absent on desktop builds predating it. */
@@ -1125,6 +1147,8 @@ export interface DesktopBridge {
   getClientPlatform?: () => string;
   setNotificationBadge?: (badge: { count: number; image: string | null }) => Promise<void>;
   onNotificationBadgeClear?: (listener: () => void) => () => void;
+  /** Replaces the menu bar item's contents; `null` removes the item. */
+  setMenuBarState?: (state: DesktopMenuBarState | null) => Promise<void>;
   /**
    * The OS locale as a BCP-47 tag, which the renderer cannot read for itself:
    * the packaged app ships only the `en-US` Chromium locale pak, so

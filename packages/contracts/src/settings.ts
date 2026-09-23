@@ -290,7 +290,24 @@ export const LoadBalancingWeights = Schema.Record(
 
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
 
+/** Text beside the desktop menu bar icon. macOS only; other trays show no text. */
+export const MenuBarTitle = Schema.Literals(["icon", "counts", "limits", "counts-and-limits"]);
+export type MenuBarTitle = typeof MenuBarTitle.Type;
+/** Optional groups in the menu bar dropdown. Threads needing attention always show. */
+export const MenuBarSection = Schema.Literals(["working", "finished", "limits"]);
+export type MenuBarSection = typeof MenuBarSection.Type;
+export const DEFAULT_MENU_BAR_SECTIONS: ReadonlyArray<MenuBarSection> = [
+  "working",
+  "finished",
+  "limits",
+];
+
 export const ClientSettingsSchema = Schema.Struct({
+  menuBarEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  menuBarTitle: MenuBarTitle.pipe(Schema.withDecodingDefault(Effect.succeed("counts" as const))),
+  menuBarSections: Schema.Array(MenuBarSection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_MENU_BAR_SECTIONS)),
+  ),
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
@@ -1766,6 +1783,9 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
+  menuBarEnabled: Schema.optionalKey(Schema.Boolean),
+  menuBarTitle: Schema.optionalKey(MenuBarTitle),
+  menuBarSections: Schema.optionalKey(Schema.Array(MenuBarSection)),
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),

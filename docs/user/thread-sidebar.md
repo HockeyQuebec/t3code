@@ -143,3 +143,15 @@ Choose **Snooze → Custom…** from a thread's menu to pick a date and time in 
 local time zone, or a duration in minutes, hours, or days. Durations start when
 you confirm; one day means 24 hours. On web and desktop, you can also snooze
 several selected threads together. Choose **Wake thread** to bring a thread back early.
+
+## Check agents from the menu bar
+
+On macOS, the desktop app puts a T3 item in the menu bar. It gets a dot when a
+thread needs approval or input, or has failed. Click it to see those threads, plus
+running threads, recently finished threads, and usage limits. Choose a thread to
+open it. The item shows threads only while a T3 Code window is open.
+
+Change what it shows in **Settings → General → Menu bar**. You can hide the item,
+choose which groups appear, and pick the text next to the icon: agent counts (`!`
+means threads that need you, `↻` means running threads), your fullest usage limit,
+both, or no text.

@@ -338,6 +338,23 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification toast popup completion input approval failure"],
   },
   {
+    id: "menu-bar",
+    title: "Menu bar",
+    to: "/settings/general",
+    searchTerms: ["menu bar tray status item icon agents working running limits usage"],
+    desktopOnly: true,
+    macOnly: true,
+  },
+  {
+    id: "menu-bar-text",
+    title: "Menu bar text",
+    to: "/settings/general",
+    targetId: "menu-bar",
+    searchTerms: ["menu bar tray title counts usage limit percent icon only"],
+    desktopOnly: true,
+    macOnly: true,
+  },
+  {
     id: "time-format",
     title: "Time format",
     to: "/settings/general",
