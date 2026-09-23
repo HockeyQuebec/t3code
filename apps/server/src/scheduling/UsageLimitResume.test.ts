@@ -125,6 +125,9 @@ const makeHarness = (input: {
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       getInstanceInfo: () => unsupported(),
       rollbackConversation: () => unsupported(),
+      compactThread: () => unsupported(),
+      assertConversationRollbackSupported: () => unsupported(),
+      uploadFeedback: () => unsupported(),
       get streamEvents() {
         return Stream.empty;
       },

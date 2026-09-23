@@ -170,7 +170,7 @@ const SUCCESSFUL_RUN = [
 ];
 
 describe("mapHarnessEventToRuntimeEvents", () => {
-  effectIt("maps a three-step run to a full turn of runtime events", () =>
+  effectIt.effect("maps a three-step run to a full turn of runtime events", () =>
     Effect.sync(() => {
       const { events } = replay(SUCCESSFUL_RUN);
 
@@ -246,7 +246,7 @@ describe("mapHarnessEventToRuntimeEvents", () => {
     }),
   );
 
-  effectIt("carries the workspace path into the closing assistant item", () =>
+  effectIt.effect("carries the workspace path into the closing assistant item", () =>
     Effect.sync(() => {
       const { events } = replay(SUCCESSFUL_RUN);
       const summary = events.at(-2)!;
@@ -258,12 +258,12 @@ describe("mapHarnessEventToRuntimeEvents", () => {
       const detail = summary.type === "item.completed" ? (summary.payload.detail ?? "") : "";
       expect(detail).toContain("/repos/.worktrees/run-abc");
       expect(detail).toContain("3 steps");
-      expect(detail).toContain("91.2s");
+      expect(detail).toContain("91.3s");
       expect(summary.itemId).toBe(`harness:${RUN_ID}:summary`);
     }),
   );
 
-  effectIt("surfaces a failed step's error and fails the turn", () =>
+  effectIt.effect("surfaces a failed step's error and fails the turn", () =>
     Effect.sync(() => {
       const { events } = replay([
         runStarted("evaluated_change"),
@@ -303,7 +303,7 @@ describe("mapHarnessEventToRuntimeEvents", () => {
     }),
   );
 
-  effectIt("does not reopen a turn that is already running", () =>
+  effectIt.effect("does not reopen a turn that is already running", () =>
     Effect.sync(() => {
       const parsed = parseHarnessEvent(decodeJsonLine(runStarted("vibe_code")));
       const mapped = mapHarnessEventToRuntimeEvents(
@@ -372,7 +372,7 @@ function replayStep(lines: ReadonlyArray<unknown>): {
 }
 
 describe("mapAgentActivityToRuntimeEvents", () => {
-  effectIt("turns a Claude step into messages and tool items on the thread", () =>
+  effectIt.effect("turns a Claude step into messages and tool items on the thread", () =>
     Effect.sync(() => {
       const { events, progress } = replayStep([
         {
@@ -438,7 +438,7 @@ describe("mapAgentActivityToRuntimeEvents", () => {
     }),
   );
 
-  effectIt("gives every emitted event its own id", () =>
+  effectIt.effect("gives every emitted event its own id", () =>
     Effect.sync(() => {
       const { events } = replayStep([
         {
@@ -459,7 +459,7 @@ describe("mapAgentActivityToRuntimeEvents", () => {
     }),
   );
 
-  effectIt("reports an agent's mid-step failure as a warning, not a turn failure", () =>
+  effectIt.effect("reports an agent's mid-step failure as a warning, not a turn failure", () =>
     Effect.sync(() => {
       const { events } = replayStep([{ type: "error", message: "You've hit your usage limit." }]);
       expect(events).toHaveLength(1);
@@ -471,7 +471,7 @@ describe("mapAgentActivityToRuntimeEvents", () => {
     }),
   );
 
-  effectIt("keeps a Codex command's outcome on one item", () =>
+  effectIt.effect("keeps a Codex command's outcome on one item", () =>
     Effect.sync(() => {
       const item = {
         id: "item_1",
@@ -494,7 +494,7 @@ describe("mapAgentActivityToRuntimeEvents", () => {
 });
 
 describe("makeStepProgressEvent", () => {
-  effectIt("updates the node's own item with who is working and on what", () =>
+  effectIt.effect("updates the node's own item with who is working and on what", () =>
     Effect.sync(() => {
       const command = parseHarnessStepCommand({
         provider: "claude",

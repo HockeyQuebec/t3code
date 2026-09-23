@@ -30,6 +30,8 @@ const ok = (overrides: Partial<ProcessRunOutput> = {}): ProcessRunOutput => ({
   stderr: "",
   code: 0 as ProcessRunOutput["code"],
   timedOut: false,
+  stdoutInvalidUtf8: false,
+  stderrInvalidUtf8: false,
   stdoutTruncated: false,
   stderrTruncated: false,
   ...overrides,

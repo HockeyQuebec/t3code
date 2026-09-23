@@ -1,18 +1,20 @@
 import { preloadPatchFile } from "@pierre/diffs/ssr";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
 import { terminalThemeFromApp } from "../ThreadTerminalDrawer";
 import { useTheme } from "../../hooks/useTheme";
+import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import { resolveDiffThemeName, type DiffThemeName } from "../../lib/diffRendering";
+import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import { GhosttyTerminalSurface } from "~/terminal/ghostty/surface";
 
 // The font previews are the real surfaces, not lookalikes: the composer's
-// Lexical editor, the diff panel's file diff, and the Ghostty canvas
+// Tiptap editor, the diff panel's file diff, and the Ghostty canvas
 // renderer. Each already consumes the appearance font tokens (or, for the
 // terminal, the settings passed down as props), so what the row shows is
 // exactly what the app renders.
 
-const EMPTY_TERMINAL_CONTEXTS: ReadonlyArray<never> = [];
 const EMPTY_SKILLS: ReadonlyArray<never> = [];
 
 // Serialized the way the composer stores inline tokens: the $skill and the
@@ -40,12 +42,11 @@ export function PromptFontPreview() {
         editorRef={editorRef}
         value={prompt}
         cursor={cursor}
-        terminalContexts={EMPTY_TERMINAL_CONTEXTS}
+        contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
         skills={EMPTY_SKILLS}
         disabled={false}
-        placeholder="Ask for follow-up changes or attach images"
+        placeholder={DISCONNECTED_COMPOSER_PLACEHOLDER}
         className="max-h-40 min-h-12"
-        onRemoveTerminalContext={noop}
         onChange={onChange}
         onPaste={noop}
       />
@@ -78,12 +79,32 @@ function loadDiffPreviewHtml(theme: DiffThemeName): Promise<readonly string[]> {
   if (promise === undefined) {
     promise = preloadPatchFile({
       patch: DIFF_PREVIEW_PATCH,
-      options: { diffStyle: "unified", theme },
+      options: { diffStyle: "unified", theme, preferredHighlighter: PREFERRED_HIGHLIGHTER },
     }).then((results) => results.map((result) => result.prerenderedHTML));
     diffPreviewHtmlByTheme.set(theme, promise);
   }
   return promise;
 }
+
+// Pierre's prerendered stylesheet bakes its own light/dark surface colors
+// into the shadow root's @layer rules. These unlayered rules win the cascade
+// without !important and re-point the surfaces at the app's code tokens
+// (custom properties inherit across the shadow boundary), so the preview
+// follows the active theme exactly like the real diff panel does.
+const DIFF_PREVIEW_THEME_BRIDGE = `
+  :host {
+    color: var(--code-foreground);
+    background-color: var(--code-background);
+    --diffs-fg: var(--code-foreground);
+    --diffs-bg: var(--code-background);
+    --diffs-light-bg: var(--code-background);
+    --diffs-dark-bg: var(--code-background);
+  }
+  [data-diffs-header] {
+    background-color: var(--code-background);
+    color: var(--code-foreground);
+  }
+`;
 
 function StaticDiffHtml({ html }: { html: string }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -92,6 +113,9 @@ function StaticDiffHtml({ html }: { html: string }) {
     if (host === null) return;
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
     shadow.innerHTML = html;
+    const bridge = document.createElement("style");
+    bridge.textContent = DIFF_PREVIEW_THEME_BRIDGE;
+    shadow.append(bridge);
   }, [html]);
   return <div ref={hostRef} />;
 }
@@ -158,7 +182,7 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
   const mountRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<GhosttyTerminalSurface | null>(null);
   const fontRef = useRef({ family, size });
-  const { resolvedTheme } = useTheme();
+  const { theme, resolvedTheme } = useTheme();
 
   useEffect(() => {
     const current = fontRef.current;
@@ -167,12 +191,14 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
     void surfaceRef.current?.setFont(previewTerminalFont(family, size));
   }, [family, size]);
 
+  // Re-read the terminal tokens on any theme change — switching between two
+  // palettes can leave resolvedTheme (light/dark) untouched.
   useEffect(() => {
     const mount = mountRef.current;
     const surface = surfaceRef.current;
     if (!mount || !surface) return;
     surface.setTheme(terminalThemeFromApp(mount));
-  }, [resolvedTheme]);
+  }, [theme, resolvedTheme]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -213,7 +239,6 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
       onData: echo,
       onResize: noop,
       onSelectionChange: noop,
-      onCopy: (text) => void navigator.clipboard?.writeText(text).catch(noop),
       // Tab keeps walking the settings page instead of feeding the echo loop.
       beforeKey: (event) => event.key !== "Tab",
       onLinkActivate: noop,

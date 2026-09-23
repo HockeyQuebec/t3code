@@ -3,6 +3,7 @@ import type {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderLimitSnapshot,
+  ServerProviderUsageWindow,
 } from "@t3tools/contracts";
 import {
   type AgentLimitState,
@@ -11,8 +12,6 @@ import {
   EMPTY_LIMIT_STATE,
   limitLevel,
   mergeLimitState,
-  parseClaudeRateLimitInfo,
-  parseRateLimitsBlock,
 } from "@t3tools/shared/agentLimits";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -121,18 +120,30 @@ function toSnapshotRow(tracked: TrackedProvider): ProviderLimitSnapshot {
 }
 
 /**
- * Claude reports one window per event with a fractional utilization; everyone
- * else sends a Codex-shaped block naming both windows. The shapes do not
- * collide, so the driver only decides which reader is tried first.
+ * Adapters normalise every provider's announcement into labelled windows. The
+ * session window is the short one that usually binds; anything longer is the
+ * weekly-ish allowance.
  */
-function readEvent(driver: string, rateLimits: unknown, observedAt: number): AgentLimitState {
-  if (driver === "claude") {
-    const claude = parseClaudeRateLimitInfo(rateLimits, observedAt);
-    if (claude.source !== "unknown") {
-      return claude;
-    }
+function readWindows(
+  windows: ReadonlyArray<ServerProviderUsageWindow>,
+  observedAt: number,
+): AgentLimitState {
+  const toState = (window: ServerProviderUsageWindow): AgentLimitWindow => ({
+    usedPercent: window.usedPercent,
+    resetsAt: window.resetsAt === undefined ? null : Date.parse(window.resetsAt) / 1000,
+    windowMinutes: window.windowDurationMins ?? null,
+  });
+  const short = windows.find((window) => window.kind === "session");
+  const long = windows.find((window) => window.kind === "weekly");
+  if (short === undefined && long === undefined) {
+    return EMPTY_LIMIT_STATE;
   }
-  return parseRateLimitsBlock(rateLimits, "providerSession", observedAt);
+  return {
+    short: short === undefined ? null : toState(short),
+    long: long === undefined ? null : toState(long),
+    source: "providerSession",
+    observedAt,
+  };
 }
 
 const make = () =>
@@ -175,11 +186,11 @@ const make = () =>
     const ingest = Effect.fn("agentLimits.ingest")(function* (
       driver: ProviderDriverKind,
       instanceId: ProviderInstanceId | undefined,
-      rateLimits: unknown,
+      windows: ReadonlyArray<ServerProviderUsageWindow>,
     ) {
       const now = yield* DateTime.now;
       const nowSeconds = DateTime.toEpochMillis(now) / 1000;
-      const incoming = readEvent(driver, rateLimits, nowSeconds);
+      const incoming = readWindows(windows, nowSeconds);
 
       const key = trackingKey(driver, instanceId);
       const changed = yield* Ref.modify(tracked, (current) => {
@@ -207,7 +218,7 @@ const make = () =>
     yield* providerService.streamEvents.pipe(
       Stream.runForEach((event) =>
         event.type === "account.rate-limits.updated"
-          ? ingest(event.provider, event.providerInstanceId, event.payload.rateLimits)
+          ? ingest(event.provider, event.providerInstanceId, event.payload.limits.windows)
           : Effect.void,
       ),
       Effect.forkScoped,

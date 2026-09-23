@@ -51,7 +51,10 @@ const makeEngineStub = Effect.gen(function* () {
         // Sequence numbers mean nothing to the scheduler.
         return { sequence: 1 };
       }),
+    readThreadEvents: () => Stream.empty,
+    getThreadReplayStats: () => Effect.die(new Error("Unsupported engine call in test")),
     streamDomainEvents: Stream.empty,
+    subscribeDomainEvents: Effect.succeed(Stream.empty),
     latestSequence: Effect.succeed(0),
   };
 

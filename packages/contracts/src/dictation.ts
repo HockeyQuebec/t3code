@@ -99,7 +99,7 @@ export const DictationFailureReason = Schema.Literals([
 ]);
 export type DictationFailureReason = typeof DictationFailureReason.Type;
 
-export class DictationError extends Schema.TaggedErrorClass<DictationError>()("DictationError", {
+export class DictationError extends Schema.TaggedError<DictationError>()("DictationError", {
   reason: DictationFailureReason,
   /** Ready to show: the CLI's own last line where there is one. */
   detail: Schema.String,

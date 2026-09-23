@@ -329,12 +329,14 @@ export const HarnessDriver: ProviderDriver<HarnessDriverSettings, HarnessDriverE
       });
 
       const snapshot: ServerProviderShape = {
-        maintenanceCapabilities,
+        resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
         getSnapshot: readSnapshot,
         refresh: readSnapshot,
         // Nothing about a harness instance changes on its own — the models are
         // configuration and availability is re-read on every snapshot.
         streamChanges: Stream.empty,
+        // Harness runs are metered by the providers it drives, not by itself.
+        applyUsageLimits: () => Effect.void,
       };
 
       return {

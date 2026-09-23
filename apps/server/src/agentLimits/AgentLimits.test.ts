@@ -35,6 +35,9 @@ const makeProviderServiceStub = Effect.gen(function* () {
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     getInstanceInfo: () => unsupported(),
     rollbackConversation: () => unsupported(),
+    compactThread: () => unsupported(),
+    assertConversationRollbackSupported: () => unsupported(),
+    uploadFeedback: () => unsupported(),
     get streamEvents() {
       return Stream.fromPubSub(events);
     },
@@ -45,7 +48,14 @@ const makeProviderServiceStub = Effect.gen(function* () {
 
 let eventCounter = 0;
 
-function rateLimitEvent(driver: string, rateLimits: unknown): ProviderRuntimeEvent {
+type TestWindow = {
+  readonly kind: "session" | "weekly";
+  readonly usedPercent: number;
+  readonly windowDurationMins?: number;
+  readonly resetsAt?: string;
+};
+
+function rateLimitEvent(driver: string, windows: ReadonlyArray<TestWindow>): ProviderRuntimeEvent {
   return {
     eventId: EventId.make(`event-${driver}-${(eventCounter += 1)}`),
     provider: ProviderDriverKind.make(driver),
@@ -53,8 +63,12 @@ function rateLimitEvent(driver: string, rateLimits: unknown): ProviderRuntimeEve
     threadId: ThreadId.make("thread-1"),
     createdAt: "2026-08-05T00:00:00.000Z",
     type: "account.rate-limits.updated",
-    payload: { rateLimits },
-  } as ProviderRuntimeEvent;
+    payload: {
+      limits: {
+        windows: windows.map((window) => ({ id: window.kind, label: window.kind, ...window })),
+      },
+    },
+  } as unknown as ProviderRuntimeEvent;
 }
 
 function tokenUsageEvent(
@@ -100,10 +114,15 @@ describe("AgentLimits", () => {
         yield* subscribed;
         yield* PubSub.publish(
           stub.events,
-          rateLimitEvent("codex", {
-            primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 1_800_000_000 },
-            secondary: { usedPercent: 9, windowDurationMins: 10_080 },
-          }),
+          rateLimitEvent("codex", [
+            {
+              kind: "session",
+              usedPercent: 40,
+              windowDurationMins: 300,
+              resetsAt: "2027-01-15T08:00:00.000Z",
+            },
+            { kind: "weekly", usedPercent: 9, windowDurationMins: 10_080 },
+          ]),
         );
         yield* settle;
         return yield* limits.latest;
@@ -129,16 +148,12 @@ describe("AgentLimits", () => {
         yield* subscribed;
         yield* PubSub.publish(
           stub.events,
-          rateLimitEvent("claude", {
-            rate_limit_info: { status: "allowed", rateLimitType: "seven_day", utilization: 0.1 },
-          }),
+          rateLimitEvent("claude", [{ kind: "weekly", usedPercent: 10 }]),
         );
         yield* settle;
         yield* PubSub.publish(
           stub.events,
-          rateLimitEvent("claude", {
-            rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.9 },
-          }),
+          rateLimitEvent("claude", [{ kind: "session", usedPercent: 90 }]),
         );
         yield* settle;
         return yield* limits.latest;
@@ -161,9 +176,7 @@ describe("AgentLimits", () => {
         yield* subscribed;
         yield* PubSub.publish(
           stub.events,
-          rateLimitEvent("claude", {
-            rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.5 },
-          }),
+          rateLimitEvent("claude", [{ kind: "session", usedPercent: 50 }]),
         );
         yield* settle;
         const polledRow = { ...(yield* limits.latest).providers[0]! };

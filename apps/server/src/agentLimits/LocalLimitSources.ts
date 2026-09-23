@@ -118,7 +118,7 @@ const make = Effect.gen(function* () {
         const file = yield* fs.open(newest.path);
         const size = Number((yield* file.stat).size);
         const length = Math.min(size, CODEX_TAIL_BYTES);
-        yield* file.seek(size - length, "start");
+        yield* file.seek(BigInt(size - length), "start");
         const bytes = yield* file.readAlloc(length);
         return Option.match(bytes, {
           onNone: () => null,

@@ -55,7 +55,7 @@ export const SidebarUsageLimits = memo(function SidebarUsageLimits() {
   return (
     <div className="flex flex-col gap-1.5 px-2 pb-1 text-[11px] leading-4">
       <Link
-        to="/settings/usage"
+        to="/usage"
         className="font-medium text-muted-foreground/60 text-[10px] uppercase tracking-wide hover:text-muted-foreground"
       >
         Limits

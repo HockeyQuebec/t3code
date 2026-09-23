@@ -24,7 +24,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
  * iterations — or two servers — can race here and still fire the turn once.
  */
 
-export class ScheduledTurnRepositoryError extends Schema.TaggedErrorClass<ScheduledTurnRepositoryError>()(
+export class ScheduledTurnRepositoryError extends Schema.TaggedError<ScheduledTurnRepositoryError>()(
   "ScheduledTurnRepositoryError",
   {
     operation: Schema.String,
