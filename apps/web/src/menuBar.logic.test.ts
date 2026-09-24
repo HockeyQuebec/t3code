@@ -99,6 +99,8 @@ describe("buildMenuBarState", () => {
           instanceId: "claude",
           label: "Claude",
           detail: null,
+          cswapAccount: null,
+          active: false,
           level: "normal",
           windows: [
             { label: "5h", usedPercent: 42.4, resetsIn: "2h", stale: false },

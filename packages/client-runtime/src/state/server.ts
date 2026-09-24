@@ -1047,6 +1047,10 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.subscribeAgentLimits,
       idleTtlMs: 0,
     }),
+    switchClaudeAccount: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:switch-claude-account",
+      tag: WS_METHODS.serverSwitchClaudeAccount,
+    }),
     spendSummary: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:spend-summary",
       tag: WS_METHODS.serverGetSpendSummary,

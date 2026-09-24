@@ -187,6 +187,7 @@ import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClien
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AgentLimits from "./agentLimits/AgentLimits.ts";
+import * as LocalLimitSources from "./agentLimits/LocalLimitSources.ts";
 import * as SpendLedger from "./agentLimits/SpendLedger.ts";
 import * as HarnessCatalog from "./harness/HarnessCatalog.ts";
 import * as Dictation from "./dictation/Dictation.ts";
@@ -787,6 +788,9 @@ const buildAppUnderTest = (options?: {
           latest: { readAt, providers: [] },
           changes: Stream.empty,
         })),
+      }),
+      Layer.mock(LocalLimitSources.LocalLimitSources)({
+        switchClaudeAccount: () => Effect.succeed({ switched: false }),
       }),
       Layer.mock(SpendLedger.SpendLedger)({
         summarize: (input) =>

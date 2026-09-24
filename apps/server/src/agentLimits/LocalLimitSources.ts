@@ -12,6 +12,7 @@ import {
   parseCswapList,
   parseCursorAboutTier,
 } from "@t3tools/shared/agentLimits";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -48,6 +49,8 @@ function row(input: {
   readonly driver: string;
   readonly label: string;
   readonly detail?: string | undefined;
+  readonly cswapAccount?: number;
+  readonly active?: boolean;
   readonly state: AgentLimitState;
 }): ProviderLimitSnapshot {
   const { state } = input;
@@ -56,6 +59,8 @@ function row(input: {
     driver: ProviderDriverKind.make(input.driver),
     label: input.label,
     ...(input.detail ? { detail: input.detail } : {}),
+    ...(input.cswapAccount === undefined ? {} : { cswapAccount: input.cswapAccount }),
+    ...(input.active ? { active: true } : {}),
     short: toWindow(state.short),
     long: toWindow(state.long),
     binding: toWindow(bindingWindow(state)),
@@ -71,6 +76,19 @@ function row(input: {
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
+
+export class LocalLimitSources extends Context.Service<
+  LocalLimitSources,
+  {
+    /**
+     * Points claude-swap at another account (`cswap switch <n>`), then re-reads
+     * the list so every client sees the new active row without waiting a poll.
+     */
+    readonly switchClaudeAccount: (
+      cswapAccount: number,
+    ) => Effect.Effect<{ readonly switched: boolean }>;
+  }
+>()("t3/agentLimits/LocalLimitSources") {}
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
@@ -140,9 +158,11 @@ const make = Effect.gen(function* () {
     const rows = parseCswapList(parsed).map((account) =>
       row({
         instanceId: `cswap-${account.number}`,
-        driver: "claude",
+        driver: "claudeAgent",
         label: account.email,
         detail: account.active ? "active" : undefined,
+        cswapAccount: account.number,
+        active: account.active,
         state: account.state,
       }),
     );
@@ -195,6 +215,18 @@ const make = Effect.gen(function* () {
   ] as const) {
     yield* poll.pipe(Effect.repeat(Schedule.spaced(interval)), Effect.forkScoped);
   }
+
+  const switchClaudeAccount = (cswapAccount: number) =>
+    processRunner
+      .run({ command: "cswap", args: ["switch", String(cswapAccount)], timeout: "30 seconds" })
+      .pipe(
+        Effect.map((output) => output.code === 0),
+        Effect.orElseSucceed(() => false),
+        Effect.tap(() => pollCswap),
+        Effect.map((switched) => ({ switched })),
+      );
+
+  return LocalLimitSources.of({ switchClaudeAccount });
 });
 
-export const layer = Layer.effectDiscard(make);
+export const layer = Layer.effect(LocalLimitSources, make);

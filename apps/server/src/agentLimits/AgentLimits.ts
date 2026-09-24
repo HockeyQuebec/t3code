@@ -166,8 +166,8 @@ const make = () =>
       const polledDrivers = new Set(polledRows.map((row) => row.driver));
       const liveDrivers = new Set(live.map((row) => row.driver));
       const providers = [
-        ...live.filter((row) => row.driver !== "claude" || !polledDrivers.has(row.driver)),
-        ...polledRows.filter((row) => row.driver === "claude" || !liveDrivers.has(row.driver)),
+        ...live.filter((row) => row.driver !== "claudeAgent" || !polledDrivers.has(row.driver)),
+        ...polledRows.filter((row) => row.driver === "claudeAgent" || !liveDrivers.has(row.driver)),
       ];
       return {
         readAt,

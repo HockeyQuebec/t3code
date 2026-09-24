@@ -121,7 +121,7 @@ describe("toLimitAccounts", () => {
     const codex = snapshot({ instanceId: "codex", usedPercent: 89 });
     const claude = {
       ...snapshot({ instanceId: "cswap-1", usedPercent: 30, resetsInSeconds: 3600 }),
-      driver: "claude",
+      driver: "claudeAgent",
       detail: "active",
       long: Option.some({
         usedPercent: 43,

@@ -148,12 +148,12 @@ describe("AgentLimits", () => {
         yield* subscribed;
         yield* PubSub.publish(
           stub.events,
-          rateLimitEvent("claude", [{ kind: "weekly", usedPercent: 10 }]),
+          rateLimitEvent("claudeAgent", [{ kind: "weekly", usedPercent: 10 }]),
         );
         yield* settle;
         yield* PubSub.publish(
           stub.events,
-          rateLimitEvent("claude", [{ kind: "session", usedPercent: 90 }]),
+          rateLimitEvent("claudeAgent", [{ kind: "session", usedPercent: 90 }]),
         );
         yield* settle;
         return yield* limits.latest;
@@ -176,7 +176,7 @@ describe("AgentLimits", () => {
         yield* subscribed;
         yield* PubSub.publish(
           stub.events,
-          rateLimitEvent("claude", [{ kind: "session", usedPercent: 50 }]),
+          rateLimitEvent("claudeAgent", [{ kind: "session", usedPercent: 50 }]),
         );
         yield* settle;
         const polledRow = { ...(yield* limits.latest).providers[0]! };

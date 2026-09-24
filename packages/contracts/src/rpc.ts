@@ -245,7 +245,13 @@ import {
   ResourceTelemetryRetryResult,
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
-import { AgentLimitsSnapshot, SpendSummary, SpendSummaryInput } from "./agentLimits.ts";
+import {
+  AgentLimitsSnapshot,
+  SpendSummary,
+  SpendSummaryInput,
+  SwitchClaudeAccountInput,
+  SwitchClaudeAccountResult,
+} from "./agentLimits.ts";
 import { HarnessCatalog, HarnessCatalogInput } from "./harness.ts";
 import {
   DictationError,
@@ -392,6 +398,7 @@ export const WS_METHODS = {
   serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
   serverGetSpendSummary: "server.getSpendSummary",
+  serverSwitchClaudeAccount: "server.switchClaudeAccount",
   serverGetHarnessCatalog: "server.getHarnessCatalog",
   serverGetDictationStatus: "server.getDictationStatus",
   serverTranscribeAudio: "server.transcribeAudio",
@@ -1430,6 +1437,12 @@ export const WsSubscribeAgentLimitsRpc = Rpc.make(WS_METHODS.subscribeAgentLimit
   stream: true,
 });
 
+export const WsServerSwitchClaudeAccountRpc = Rpc.make(WS_METHODS.serverSwitchClaudeAccount, {
+  payload: SwitchClaudeAccountInput,
+  success: SwitchClaudeAccountResult,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsServerGetSpendSummaryRpc = Rpc.make(WS_METHODS.serverGetSpendSummary, {
   payload: SpendSummaryInput,
   success: SpendSummary,
@@ -1494,6 +1507,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerTranscribeAudioRpc,
   WsServerScheduleTurnRpc,
   WsServerCancelScheduledTurnRpc,
+  WsServerSwitchClaudeAccountRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,

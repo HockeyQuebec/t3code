@@ -118,6 +118,8 @@ export interface LimitAccountDisplay {
   readonly instanceId: string;
   readonly label: string;
   readonly detail: string | null;
+  readonly cswapAccount: number | null;
+  readonly active: boolean;
   readonly level: AgentLimitLevel;
   readonly windows: ReadonlyArray<LimitWindowDisplay>;
 }
@@ -155,7 +157,8 @@ export function toLimitAccounts(
   providers: ReadonlyArray<ProviderLimitSnapshot>,
   nowMillis: number,
 ): ReadonlyArray<LimitAccountDisplay> {
-  const driverOrder = (driver: string) => (driver === "claude" ? 0 : driver === "codex" ? 1 : 2);
+  const driverOrder = (driver: string) =>
+    driver === "claudeAgent" ? 0 : driver === "codex" ? 1 : 2;
   return providers
     .toSorted(
       (left, right) =>
@@ -166,6 +169,8 @@ export function toLimitAccounts(
       instanceId: provider.instanceId,
       label: provider.label,
       detail: provider.detail ?? null,
+      cswapAccount: provider.cswapAccount ?? null,
+      active: provider.active === true,
       level: provider.level,
       windows: [
         Option.map(provider.short, (window) => toWindowDisplay(window, "5h", nowMillis)),

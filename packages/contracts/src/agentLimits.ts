@@ -45,6 +45,10 @@ export const ProviderLimitSnapshot = Schema.Struct({
   label: TrimmedNonEmptyString,
   /** A second line for the row: which account is active, or the plan tier. */
   detail: Schema.optional(TrimmedNonEmptyString),
+  /** The claude-swap slot this row reads, so a client can offer to switch to it. */
+  cswapAccount: Schema.optional(NonNegativeInt),
+  /** True for the claude-swap account new Claude sessions currently run on. */
+  active: Schema.optional(Schema.Boolean),
   /** The window that usually binds. */
   short: Schema.Option(AgentLimitWindow),
   /** The weekly-ish allowance, shown for context. */
@@ -62,6 +66,16 @@ export const AgentLimitsSnapshot = Schema.Struct({
   providers: Schema.Array(ProviderLimitSnapshot),
 });
 export type AgentLimitsSnapshot = typeof AgentLimitsSnapshot.Type;
+
+export const SwitchClaudeAccountInput = Schema.Struct({
+  cswapAccount: NonNegativeInt,
+});
+export type SwitchClaudeAccountInput = typeof SwitchClaudeAccountInput.Type;
+
+export const SwitchClaudeAccountResult = Schema.Struct({
+  switched: Schema.Boolean,
+});
+export type SwitchClaudeAccountResult = typeof SwitchClaudeAccountResult.Type;
 
 /** Where a spend total came from, kept split so the two never double-count. */
 export const SpendCostSource = Schema.Literals(["reported", "estimated", "none", "mixed"]);

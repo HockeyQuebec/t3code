@@ -152,6 +152,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AgentLimits from "./agentLimits/AgentLimits.ts";
+import * as LocalLimitSources from "./agentLimits/LocalLimitSources.ts";
 import * as SpendLedger from "./agentLimits/SpendLedger.ts";
 import * as HarnessCatalog from "./harness/HarnessCatalog.ts";
 import * as Dictation from "./dictation/Dictation.ts";
@@ -671,6 +672,7 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const agentLimits = yield* AgentLimits.AgentLimits;
       const spendLedger = yield* SpendLedger.SpendLedger;
+      const localLimitSources = yield* LocalLimitSources.LocalLimitSources;
       const harnessCatalog = yield* HarnessCatalog.HarnessCatalogService;
       const dictation = yield* Dictation.DictationService;
       const scheduledTurns = yield* ScheduledTurnScheduler.ScheduledTurnScheduler;
@@ -2660,6 +2662,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverSwitchClaudeAccount]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSwitchClaudeAccount,
+            localLimitSources.switchClaudeAccount(input.cswapAccount),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetSpendSummary]: (input) =>
           observeRpcEffect(WS_METHODS.serverGetSpendSummary, spendLedger.summarize(input), {
             "rpc.aggregate": "server",
