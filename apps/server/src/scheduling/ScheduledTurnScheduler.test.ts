@@ -212,6 +212,39 @@ describe("ScheduledTurnScheduler", () => {
     }),
   );
 
+  effectIt.live("edits a pending turn and refuses to edit a cancelled one", () =>
+    Effect.gen(function* () {
+      const stub = yield* makeEngineStub;
+
+      const result = yield* Effect.gen(function* () {
+        const scheduler = yield* ScheduledTurnScheduler.ScheduledTurnScheduler;
+        const later = yield* iso(60 * 60 * 1000);
+        const pending = yield* scheduler.schedule(
+          input({ runAt: later, commandId: CommandId.make("cmd-edit") }),
+        );
+        const sooner = yield* iso(-1_000);
+        const edited = yield* scheduler.update({
+          id: pending.id,
+          prompt: "edited prompt",
+          runAt: sooner,
+        });
+        const cancelledTurn = yield* scheduler.schedule(
+          input({ runAt: later, commandId: CommandId.make("cmd-edit-cancelled") }),
+        );
+        yield* scheduler.cancel({ id: cancelledTurn.id });
+        const refused = yield* scheduler.update({ id: cancelledTurn.id, prompt: "too late" });
+        yield* scheduler.runDuePass;
+        return { edited, refused, dispatched: yield* Ref.get(stub.dispatched) };
+      }).pipe(Effect.provide(testLayer(stub.layer)), Effect.scoped);
+
+      expect(result.edited.updated).toBe(true);
+      expect(result.refused.updated).toBe(false);
+      // Moving it earlier made it due, and it went out with the new text.
+      expect(result.dispatched).toHaveLength(1);
+      expect(JSON.stringify(result.dispatched[0])).toContain("edited prompt");
+    }),
+  );
+
   effectIt.live("records why a dispatch failed and does not retry it", () =>
     Effect.gen(function* () {
       const stub = yield* makeEngineStub;

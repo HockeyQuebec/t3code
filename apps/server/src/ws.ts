@@ -2698,6 +2698,12 @@ const makeWsRpcLayer = (
             scheduledTurns.schedule(input).pipe(Effect.orDie),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.serverUpdateScheduledTurn]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpdateScheduledTurn,
+            scheduledTurns.update(input).pipe(Effect.orDie),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverCancelScheduledTurn]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverCancelScheduledTurn,

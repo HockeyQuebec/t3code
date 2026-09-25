@@ -1078,6 +1078,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:schedule-turn",
       tag: WS_METHODS.serverScheduleTurn,
     }),
+    updateScheduledTurn: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:update-scheduled-turn",
+      tag: WS_METHODS.serverUpdateScheduledTurn,
+    }),
     cancelScheduledTurn: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:cancel-scheduled-turn",
       tag: WS_METHODS.serverCancelScheduledTurn,

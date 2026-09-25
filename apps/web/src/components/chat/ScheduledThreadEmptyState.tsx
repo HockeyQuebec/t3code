@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { newCommandId } from "~/lib/utils";
 import {
   useCancelScheduledTurn,
+  useUpdateScheduledTurn,
   useScheduledTurns,
   useScheduleTurn,
 } from "~/lib/scheduledTurnsState";
@@ -36,6 +37,7 @@ export function ScheduledThreadEmptyState({
 }: ScheduledThreadEmptyStateProps) {
   const scheduledQuery = useScheduledTurns();
   const cancelScheduledTurn = useCancelScheduledTurn();
+  const updateScheduledTurn = useUpdateScheduledTurn();
   const scheduleTurn = useScheduleTurn();
   const nowMillis = useCoarseNow();
   const [busy, setBusy] = useState(false);
@@ -117,6 +119,15 @@ export function ScheduledThreadEmptyState({
       onCancel={() => void handleCancel(turn)}
       onSendNow={() => void onSendPrompt(turn.prompt)}
       onReschedule={(runAtIso) => handleReschedule(turn, runAtIso)}
+      onEdit={async (changes) => {
+        setBusy(true);
+        try {
+          await updateScheduledTurn({ id: turn.id, ...changes });
+          refresh();
+        } finally {
+          setBusy(false);
+        }
+      }}
     />
   );
 }

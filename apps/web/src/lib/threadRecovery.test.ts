@@ -200,7 +200,7 @@ describe("resolveScheduledActivityCopy", () => {
 
 describe("resolveScheduledTurnActions", () => {
   it("offers running early or calling off only while pending", () => {
-    expect(resolveScheduledTurnActions("pending")).toEqual(["run-now", "cancel"]);
+    expect(resolveScheduledTurnActions("pending")).toEqual(["run-now", "edit", "cancel"]);
   });
 
   it("offers recovery for a schedule that never ran", () => {

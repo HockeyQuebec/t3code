@@ -223,7 +223,7 @@ export function resolveScheduledActivityCopy(input: {
   };
 }
 
-export type ScheduledTurnAction = "run-now" | "cancel" | "send-now" | "reschedule";
+export type ScheduledTurnAction = "run-now" | "cancel" | "send-now" | "reschedule" | "edit";
 
 /**
  * What a schedule in this state can still be asked to do.
@@ -235,7 +235,7 @@ export function resolveScheduledTurnActions(
   status: string | null,
 ): ReadonlyArray<ScheduledTurnAction> {
   if (status === "pending") {
-    return ["run-now", "cancel"];
+    return ["run-now", "edit", "cancel"];
   }
   if (status === "cancelled" || status === "failed") {
     return ["send-now", "reschedule"];

@@ -9,6 +9,8 @@ import {
   type ScheduledTurnList,
   type ScheduleTurnInput,
   ThreadTurnStartCommand,
+  type UpdateScheduledTurnInput,
+  type UpdateScheduledTurnResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -49,6 +51,9 @@ export class ScheduledTurnScheduler extends Context.Service<
     readonly schedule: (
       input: ScheduleTurnInput,
     ) => Effect.Effect<ScheduledTurn, ScheduledTurnRepositoryError>;
+    readonly update: (
+      input: UpdateScheduledTurnInput,
+    ) => Effect.Effect<UpdateScheduledTurnResult, ScheduledTurnRepositoryError>;
     readonly cancel: (
       input: CancelScheduledTurnInput,
     ) => Effect.Effect<CancelScheduledTurnResult, ScheduledTurnRepositoryError>;
@@ -183,6 +188,12 @@ export const make = Effect.gen(function* () {
   const schedule: ScheduledTurnScheduler["Service"]["schedule"] = (input) =>
     repository.schedule(input).pipe(Effect.tap(() => publish));
 
+  const update: ScheduledTurnScheduler["Service"]["update"] = (input) =>
+    repository.update(input).pipe(
+      Effect.tap((updated) => (updated ? publish : Effect.void)),
+      Effect.map((updated) => ({ updated }) satisfies UpdateScheduledTurnResult),
+    );
+
   const cancel: ScheduledTurnScheduler["Service"]["cancel"] = (input) =>
     Effect.gen(function* () {
       const atIso = DateTime.formatIso(yield* DateTime.now);
@@ -207,6 +218,7 @@ export const make = Effect.gen(function* () {
 
   return {
     schedule,
+    update,
     cancel,
     latest: buildList,
     changes: Stream.fromPubSub(changes),

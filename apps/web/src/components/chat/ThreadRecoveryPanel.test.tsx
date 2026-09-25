@@ -14,12 +14,19 @@ const testState = vi.hoisted(() => ({
   useScheduledTurns: vi.fn(),
   useCancelScheduledTurn: vi.fn(),
   useScheduleTurn: vi.fn(),
+  useUpdateScheduledTurn: vi.fn(),
 }));
 
-vi.mock("~/lib/scheduledTurnsState", () => ({
+vi.mock("~/lib/agentLimitsState", () => ({
+  useAgentLimits: () => ({ data: null }),
+}));
+
+vi.mock("~/lib/scheduledTurnsState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/lib/scheduledTurnsState")>()),
   useScheduledTurns: testState.useScheduledTurns,
   useCancelScheduledTurn: testState.useCancelScheduledTurn,
   useScheduleTurn: testState.useScheduleTurn,
+  useUpdateScheduledTurn: testState.useUpdateScheduledTurn,
 }));
 
 import { ThreadRecoveryPanel } from "./ThreadRecoveryPanel";
@@ -36,6 +43,7 @@ function mockSchedule(scheduled: ReadonlyArray<ScheduledTurn>) {
   });
   testState.useCancelScheduledTurn.mockReturnValue(vi.fn(async () => true));
   testState.useScheduleTurn.mockReturnValue(vi.fn());
+  testState.useUpdateScheduledTurn.mockReturnValue(vi.fn(async () => true));
 }
 
 function makeTurn(overrides: Partial<ScheduledTurn> = {}): ScheduledTurn {
@@ -143,6 +151,13 @@ describe("ThreadRecoveryPanel", () => {
     });
     expect(markup).toContain("Queued for later");
     expect(markup).toContain("Run now");
+  });
+
+  it("shows a composer-queued turn that no activity announced", () => {
+    mockSchedule([makeTurn({ origin: "user" })]);
+    const markup = render();
+    expect(markup).toContain("Queued to run later");
+    expect(markup).toContain("Edit message");
   });
 
   it("drops the card once the schedule has been dispatched", () => {

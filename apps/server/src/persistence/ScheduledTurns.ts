@@ -7,6 +7,7 @@ import {
   type ScheduleTurnInput,
   ThreadId,
   TrimmedNonEmptyString,
+  type UpdateScheduledTurnInput,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -110,6 +111,10 @@ export class ScheduledTurnRepository extends Context.Service<
       error: string,
       atIso: string,
     ) => Effect.Effect<void, ScheduledTurnRepositoryError>;
+    /** True only when a still-pending row was changed. */
+    readonly update: (
+      input: UpdateScheduledTurnInput,
+    ) => Effect.Effect<boolean, ScheduledTurnRepositoryError>;
     /** True only when a still-pending row was called off. */
     readonly cancel: (
       id: ScheduledTurnId,
@@ -321,8 +326,22 @@ export const make = Effect.gen(function* () {
       Effect.map((rows) => rows.length > 0),
     );
 
+  const update: ScheduledTurnRepository["Service"]["update"] = (input) =>
+    sql`
+      UPDATE scheduled_turns
+      SET prompt = COALESCE(${input.prompt ?? null}, prompt),
+          run_at = COALESCE(${input.runAt ?? null}, run_at)
+      WHERE id = ${input.id}
+        AND status = 'pending'
+      RETURNING id AS "id"
+    `.pipe(
+      Effect.mapError(toRepositoryError("ScheduledTurnRepository.update:query")),
+      Effect.map((rows) => rows.length > 0),
+    );
+
   return {
     schedule,
+    update,
     listPending,
     listAll,
     claimDue,

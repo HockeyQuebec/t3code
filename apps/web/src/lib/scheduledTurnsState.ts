@@ -2,6 +2,7 @@ import type {
   CancelScheduledTurnInput,
   ScheduledTurn,
   ScheduleTurnInput,
+  UpdateScheduledTurnInput,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { useCallback } from "react";
@@ -40,6 +41,27 @@ export function useScheduleTurn() {
         throw Cause.squash(result.cause);
       }
       return result.value;
+    },
+    [environmentId, command],
+  );
+}
+
+/** Changes a pending schedule's prompt or time; false once it has fired. */
+export function useUpdateScheduledTurn() {
+  const primaryEnvironment = usePrimaryEnvironment();
+  const environmentId = primaryEnvironment?.environmentId ?? null;
+  const command = useAtomCommand(serverEnvironment.updateScheduledTurn, { reportFailure: false });
+
+  return useCallback(
+    async (input: UpdateScheduledTurnInput): Promise<boolean> => {
+      if (environmentId === null) {
+        throw new Error("No environment is selected.");
+      }
+      const result = await command({ environmentId, input });
+      if (result._tag === "Failure") {
+        throw Cause.squash(result.cause);
+      }
+      return result.value.updated;
     },
     [environmentId, command],
   );

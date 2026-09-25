@@ -7,10 +7,15 @@ import type {
 import { RotateCcwIcon } from "lucide-react";
 import { useCallback, useState } from "react";
 
-import { useCancelScheduledTurn, useScheduledTurns } from "~/lib/scheduledTurnsState";
+import {
+  useCancelScheduledTurn,
+  useScheduledTurns,
+  useUpdateScheduledTurn,
+} from "~/lib/scheduledTurnsState";
 import {
   collectScheduledActivities,
   findScheduledTurnById,
+  scheduledTurnsForThread,
   resolveResumeCandidate,
   resolveScheduledActivityCopy,
   useCoarseNow,
@@ -50,6 +55,7 @@ export function ThreadRecoveryPanel({
 }: ThreadRecoveryPanelProps) {
   const scheduledQuery = useScheduledTurns();
   const cancelScheduledTurn = useCancelScheduledTurn();
+  const updateScheduledTurn = useUpdateScheduledTurn();
   const nowMillis = useCoarseNow();
   const [busyScheduleId, setBusyScheduleId] = useState<string | null>(null);
   const refresh = scheduledQuery.refresh;
@@ -65,10 +71,19 @@ export function ThreadRecoveryPanel({
   // Only schedules still waiting to run. One that already ran, was cancelled,
   // or was run early is history the timeline already shows; keeping its card
   // here would stack a stale card above the composer on every limit hit.
-  const references = collectScheduledActivities(activities).filter((reference) => {
-    const turn = findScheduledTurnById(scheduled, reference.scheduledTurnId);
-    return turn !== null && turn.threadId === threadId && turn.status === "pending";
-  });
+  // A "send later" from the composer writes no activity, so the pending rows
+  // themselves drive the list and an activity only supplies the wording. A
+  // thread with no messages yet shows its schedule in the empty state instead.
+  const activityById = new Map(
+    collectScheduledActivities(activities).map((reference) => [
+      reference.scheduledTurnId,
+      reference,
+    ]),
+  );
+  const pending =
+    lastUserMessageText === null
+      ? []
+      : scheduledTurnsForThread(scheduled, threadId).filter((turn) => turn.status === "pending");
 
   const handleRunNow = useCallback(
     async (turn: ScheduledTurn) => {
@@ -91,6 +106,19 @@ export function ThreadRecoveryPanel({
     [cancelScheduledTurn, onSendPrompt, refresh],
   );
 
+  const handleEdit = useCallback(
+    async (turn: ScheduledTurn, changes: { readonly prompt?: string; readonly runAt?: string }) => {
+      setBusyScheduleId(turn.id);
+      try {
+        await updateScheduledTurn({ id: turn.id, ...changes });
+        refresh();
+      } finally {
+        setBusyScheduleId(null);
+      }
+    },
+    [refresh, updateScheduledTurn],
+  );
+
   const handleCancel = useCallback(
     async (turn: ScheduledTurn) => {
       setBusyScheduleId(turn.id);
@@ -104,7 +132,7 @@ export function ThreadRecoveryPanel({
     [cancelScheduledTurn, refresh],
   );
 
-  if (resume === null && references.length === 0) {
+  if (resume === null && pending.length === 0) {
     return null;
   }
 
@@ -130,25 +158,25 @@ export function ThreadRecoveryPanel({
           </Button>
         </div>
       )}
-      {references.map((reference) => {
-        const turn = findScheduledTurnById(scheduled, reference.scheduledTurnId);
+      {pending.map((turn) => {
+        const reference = activityById.get(turn.id);
         const copy = resolveScheduledActivityCopy({
-          kind: reference.kind,
-          origin: turn?.origin ?? null,
-          summary: reference.summary,
+          kind: reference?.kind ?? null,
+          origin: turn.origin,
+          summary: reference?.summary ?? null,
         });
-        const busy = busyScheduleId === reference.scheduledTurnId || isWorking;
+        const busy = busyScheduleId === turn.id || isWorking;
         return (
           <ScheduledTurnCard
-            key={reference.scheduledTurnId}
+            key={turn.id}
             turn={turn}
             title={copy.title}
             reason={copy.reason}
-            fallbackRunAt={reference.runAt}
             nowMillis={nowMillis}
             busy={busy}
-            onRunNow={turn === null ? undefined : () => void handleRunNow(turn)}
-            onCancel={turn === null ? undefined : () => void handleCancel(turn)}
+            onRunNow={() => void handleRunNow(turn)}
+            onEdit={(changes) => handleEdit(turn, changes)}
+            onCancel={() => void handleCancel(turn)}
           />
         );
       })}

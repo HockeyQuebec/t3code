@@ -2119,14 +2119,32 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           return;
         }
       }
-      await scheduleTurn({
-        threadId: activeThreadId,
-        prompt: queuedPrompt,
-        modelSelection: selectedModelSelection,
-        // Already an absolute instant from the picker; passed through rather
-        // than reparsed, so the viewer's zone is not applied twice.
-        runAt: runAtIso,
-        commandId: newCommandId(),
+      try {
+        await scheduleTurn({
+          threadId: activeThreadId,
+          prompt: queuedPrompt,
+          modelSelection: selectedModelSelection,
+          // Already an absolute instant from the picker; passed through rather
+          // than reparsed, so the viewer's zone is not applied twice.
+          runAt: runAtIso,
+          commandId: newCommandId(),
+        });
+      } catch {
+        toastManager.add({
+          type: "error",
+          title: "Could not queue this prompt",
+          description: "Nothing was scheduled. Try again.",
+        });
+        return;
+      }
+      toastManager.add({
+        type: "success",
+        title: "Queued to send later",
+        description: new Date(runAtIso).toLocaleString(undefined, {
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        }),
       });
       // The prompt now lives on the queued turn, so clear the box the same way
       // a send does — on any thread, not just a promoted draft. Leaving the

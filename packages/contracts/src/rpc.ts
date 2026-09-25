@@ -268,6 +268,8 @@ import {
   ScheduledTurn,
   ScheduledTurnList,
   ScheduleTurnInput,
+  UpdateScheduledTurnInput,
+  UpdateScheduledTurnResult,
 } from "./scheduledTurns.ts";
 import {
   UsageLimitSourceError,
@@ -407,6 +409,7 @@ export const WS_METHODS = {
   serverTranscribeAudio: "server.transcribeAudio",
   serverScheduleTurn: "server.scheduleTurn",
   serverCancelScheduledTurn: "server.cancelScheduledTurn",
+  serverUpdateScheduledTurn: "server.updateScheduledTurn",
   serverSignalProcess: "server.signalProcess",
   serverReportClientActivity: "server.reportClientActivity",
   serverReportHostPowerState: "server.reportHostPowerState",
@@ -1422,6 +1425,12 @@ export const WsServerScheduleTurnRpc = Rpc.make(WS_METHODS.serverScheduleTurn, {
   error: EnvironmentAuthorizationError,
 });
 
+export const WsServerUpdateScheduledTurnRpc = Rpc.make(WS_METHODS.serverUpdateScheduledTurn, {
+  payload: UpdateScheduledTurnInput,
+  success: UpdateScheduledTurnResult,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsServerCancelScheduledTurnRpc = Rpc.make(WS_METHODS.serverCancelScheduledTurn, {
   payload: CancelScheduledTurnInput,
   success: CancelScheduledTurnResult,
@@ -1526,6 +1535,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerTranscribeAudioRpc,
   WsServerScheduleTurnRpc,
   WsServerCancelScheduledTurnRpc,
+  WsServerUpdateScheduledTurnRpc,
   WsServerSwitchClaudeAccountRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,

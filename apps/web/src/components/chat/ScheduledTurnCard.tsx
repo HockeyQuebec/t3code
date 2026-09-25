@@ -1,5 +1,6 @@
 import type { ScheduledTurn } from "@t3tools/contracts";
 import { AlarmClockIcon, AlertTriangleIcon } from "lucide-react";
+import { useState } from "react";
 
 import {
   describeScheduledTurnState,
@@ -9,6 +10,7 @@ import {
 } from "~/lib/threadRecovery";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
 import { SendLaterMenu } from "./SendLaterMenu";
 
 interface ScheduledTurnCardProps {
@@ -28,6 +30,10 @@ interface ScheduledTurnCardProps {
   readonly onCancel?: (() => void) | undefined;
   readonly onSendNow?: (() => void) | undefined;
   readonly onReschedule?: ((runAtIso: string) => void | Promise<void>) | undefined;
+  /** Changes a pending schedule in place. */
+  readonly onEdit?:
+    | ((changes: { readonly prompt?: string; readonly runAt?: string }) => void | Promise<void>)
+    | undefined;
   readonly className?: string;
 }
 
@@ -49,8 +55,10 @@ export function ScheduledTurnCard({
   onCancel,
   onSendNow,
   onReschedule,
+  onEdit,
   className,
 }: ScheduledTurnCardProps) {
+  const [draft, setDraft] = useState<string | null>(null);
   const runAt = turn?.runAt ?? fallbackRunAt;
   const runAtMillis = runAt === null ? Number.NaN : Date.parse(runAt);
   const hasRunAt = Number.isFinite(runAtMillis);
@@ -62,7 +70,16 @@ export function ScheduledTurnCard({
   const cancel = actions.includes("cancel") ? onCancel : undefined;
   const sendNow = actions.includes("send-now") ? onSendNow : undefined;
   const reschedule = actions.includes("reschedule") ? onReschedule : undefined;
+  const editable = actions.includes("edit") ? onEdit : undefined;
+  const editing = draft !== null && editable !== undefined;
+  const saveDraft = () => {
+    const prompt = draft?.trim() ?? "";
+    if (editable === undefined || prompt.length === 0) return;
+    if (prompt !== turn?.prompt) void editable({ prompt });
+    setDraft(null);
+  };
   const hasActions =
+    editable !== undefined ||
     runNow !== undefined ||
     cancel !== undefined ||
     sendNow !== undefined ||
@@ -81,7 +98,33 @@ export function ScheduledTurnCard({
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground">{title}</div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground/80">{reason}</p>
-          {turn && turn.prompt.trim().length > 0 ? (
+          {editing ? (
+            <div className="mt-2 flex flex-col gap-2">
+              <Textarea
+                aria-label="Scheduled message"
+                value={draft}
+                autoFocus
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) saveDraft();
+                  if (event.key === "Escape") setDraft(null);
+                }}
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={busy || draft.trim().length === 0}
+                  onClick={saveDraft}
+                >
+                  Save
+                </Button>
+                <Button size="xs" variant="ghost" onClick={() => setDraft(null)}>
+                  Discard
+                </Button>
+              </div>
+            </div>
+          ) : turn && turn.prompt.trim().length > 0 ? (
             <p className="mt-2 line-clamp-3 rounded-lg bg-muted/40 px-2.5 py-1.5 text-xs text-foreground/90">
               {turn.prompt}
             </p>
@@ -103,7 +146,7 @@ export function ScheduledTurnCard({
               <span>{note}</span>
             </div>
           ) : null}
-          {hasActions ? (
+          {hasActions && !editing ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {runNow ? (
                 <Button size="xs" variant="outline" disabled={busy} onClick={runNow}>
@@ -114,6 +157,22 @@ export function ScheduledTurnCard({
                 <Button size="xs" variant="outline" disabled={busy} onClick={sendNow}>
                   Send it now
                 </Button>
+              ) : null}
+              {editable && turn ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setDraft(turn.prompt)}
+                >
+                  Edit message
+                </Button>
+              ) : null}
+              {editable ? (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
+                  Change time
+                  <SendLaterMenu disabled={busy} onSchedule={(runAt) => editable({ runAt })} />
+                </span>
               ) : null}
               {cancel ? (
                 <Button size="xs" variant="ghost" disabled={busy} onClick={cancel}>

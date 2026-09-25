@@ -67,6 +67,7 @@ export const RPC_REQUIRED_SCOPES = {
   // Queuing work to run later is operating the queue, not reading it.
   [WS_METHODS.serverScheduleTurn]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverCancelScheduledTurn]: AuthOrchestrationOperateScope,
+  [WS_METHODS.serverUpdateScheduledTurn]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverSwitchClaudeAccount]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetUsageSummary]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRefreshUsageRates]: AuthOrchestrationReadScope,

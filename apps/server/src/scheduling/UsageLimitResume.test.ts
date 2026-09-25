@@ -153,6 +153,7 @@ const makeHarness = (input: {
           yield* Ref.update(scheduled, (rows) => [...rows, row]);
           return row;
         }),
+      update: () => Effect.succeed({ updated: false }),
       cancel: () => unsupported(),
       latest: Effect.map(Ref.get(scheduled), (rows) => ({
         readAt: DateTime.makeUnsafe(input.now * 1000),

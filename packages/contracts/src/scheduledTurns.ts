@@ -81,6 +81,20 @@ export const CancelScheduledTurnInput = Schema.Struct({
 });
 export type CancelScheduledTurnInput = typeof CancelScheduledTurnInput.Type;
 
+/** Changes a still-pending schedule; omitted fields are left as they are. */
+export const UpdateScheduledTurnInput = Schema.Struct({
+  id: ScheduledTurnId,
+  prompt: Schema.optional(TrimmedNonEmptyString),
+  runAt: Schema.optional(IsoDateTime),
+});
+export type UpdateScheduledTurnInput = typeof UpdateScheduledTurnInput.Type;
+
+export const UpdateScheduledTurnResult = Schema.Struct({
+  /** False when it had already fired or was cancelled. */
+  updated: Schema.Boolean,
+});
+export type UpdateScheduledTurnResult = typeof UpdateScheduledTurnResult.Type;
+
 export const ScheduledTurnList = Schema.Struct({
   readAt: Schema.DateTimeUtc,
   /** Soonest first. */
