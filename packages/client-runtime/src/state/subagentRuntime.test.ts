@@ -891,3 +891,43 @@ describe("nested agents vs subagent shells", () => {
     expect(agents.map((agent) => agent.id)).toEqual(["nested-1"]);
   });
 });
+
+describe("cross-provider agents", () => {
+  it("surfaces a shell-launched agent CLI with its provider and outcome", () => {
+    const agents = foldSubagentActivities([
+      activity("tool.started", {
+        itemType: "command_execution",
+        toolCallId: "call-1",
+        detail: 'Bash: cd repo && codex exec "fix the tests"',
+      }),
+      activity("tool.completed", {
+        itemType: "command_execution",
+        toolCallId: "call-1",
+        status: "failed",
+      }),
+    ]);
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({ id: "tool:call-1", role: "Codex", status: "failed" });
+  });
+
+  it("surfaces agent MCP servers and ignores ordinary tools", () => {
+    const agents = foldSubagentActivities([
+      activity("tool.started", {
+        itemType: "mcp_tool_call",
+        toolCallId: "call-2",
+        detail: 'mcp__claude-code__Task: {"prompt":"review"}',
+      }),
+      activity("tool.started", {
+        itemType: "command_execution",
+        toolCallId: "call-3",
+        detail: "Bash: ps aux | grep claude",
+      }),
+      activity("tool.started", {
+        itemType: "command_execution",
+        toolCallId: "call-4",
+        detail: "grep -r codex exec src",
+      }),
+    ]);
+    expect(agents.map((agent) => [agent.role, agent.status])).toEqual([["Claude", "running"]]);
+  });
+});

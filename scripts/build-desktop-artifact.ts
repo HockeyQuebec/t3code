@@ -3738,6 +3738,17 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       delete buildEnv[key];
     }
   }
+  if (hostPlatform === "darwin" && options.platform === "mac" && !buildEnv.SDKROOT) {
+    // node-gyp's default SDK lookup can pick a Command Line Tools SDK even
+    // when xcode-select points at Xcode. Use the SDK from the selected toolchain.
+    const sdk = yield* spawnAndCollectOutput(
+      ChildProcess.make("xcrun", ["--sdk", "macosx", "--show-sdk-path"]),
+    );
+    const sdkRoot = sdk.stdout.trim();
+    if (sdk.exitCode === 0 && sdkRoot && (yield* fs.exists(sdkRoot))) {
+      buildEnv.SDKROOT = sdkRoot;
+    }
+  }
   if (!options.signed) {
     buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
     delete buildEnv.CSC_LINK;

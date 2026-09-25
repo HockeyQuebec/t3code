@@ -10067,18 +10067,19 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     </div>
                   ) : activeThread ? (
-                    <div className="absolute inset-x-0 bottom-full z-0 pb-2">
-                      <ThreadRecoveryPanel
-                        threadId={activeThread.id}
-                        activities={threadActivities}
-                        latestTurn={activeLatestTurn}
-                        isWorking={isWorking || isSendBusy}
-                        lastUserMessageText={lastUserMessageText}
-                        worktreePath={activeThread.worktreePath ?? null}
-                        providerDriverKind={selectedProvider}
-                        onSendPrompt={sendPromptNow}
-                      />
-                    </div>
+                    // In flow rather than floated above the stack, so the overlay
+                    // height the timeline reserves includes it and it never
+                    // covers messages.
+                    <ThreadRecoveryPanel
+                      threadId={activeThread.id}
+                      activities={threadActivities}
+                      latestTurn={activeLatestTurn}
+                      isWorking={isWorking || isSendBusy}
+                      lastUserMessageText={lastUserMessageText}
+                      worktreePath={activeThread.worktreePath ?? null}
+                      providerDriverKind={selectedProvider}
+                      onSendPrompt={sendPromptNow}
+                    />
                   ) : null}
                   <div
                     className="relative"

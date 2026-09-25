@@ -61,10 +61,14 @@ export function ThreadRecoveryPanel({
     worktreePath,
     providerDriverKind,
   });
-  const references = collectScheduledActivities(activities).filter(
-    (reference) => reference.scheduledTurnId.length > 0,
-  );
   const scheduled = scheduledQuery.data?.scheduled ?? [];
+  // Only schedules still waiting to run. One that already ran, was cancelled,
+  // or was run early is history the timeline already shows; keeping its card
+  // here would stack a stale card above the composer on every limit hit.
+  const references = collectScheduledActivities(activities).filter((reference) => {
+    const turn = findScheduledTurnById(scheduled, reference.scheduledTurnId);
+    return turn !== null && turn.threadId === threadId && turn.status === "pending";
+  });
 
   const handleRunNow = useCallback(
     async (turn: ScheduledTurn) => {
@@ -128,9 +132,6 @@ export function ThreadRecoveryPanel({
       )}
       {references.map((reference) => {
         const turn = findScheduledTurnById(scheduled, reference.scheduledTurnId);
-        if (turn !== null && turn.threadId !== threadId) {
-          return null;
-        }
         const copy = resolveScheduledActivityCopy({
           kind: reference.kind,
           origin: turn?.origin ?? null,

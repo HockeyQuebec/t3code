@@ -145,10 +145,10 @@ describe("ThreadRecoveryPanel", () => {
     expect(markup).toContain("Run now");
   });
 
-  it("says so, and offers nothing, once the schedule has been dispatched", () => {
+  it("drops the card once the schedule has been dispatched", () => {
     mockSchedule([makeTurn({ status: "dispatched" })]);
     const markup = render({ activities: [makeActivity()] });
-    expect(markup).toContain("This already started.");
+    expect(markup).not.toContain("Waiting for the usage limit");
     expect(markup).not.toContain("Run now");
   });
 });

@@ -450,6 +450,63 @@ function asRuntimeStatus(value: unknown): RuntimeSubagentStatus | undefined {
 }
 
 /**
+ * Cross-provider agents: one provider launching another agent harness as an
+ * ordinary tool call (Claude running `codex exec`, Codex calling a Claude MCP
+ * server, …). No provider reports these as tasks, so the fold recognizes them
+ * from the tool row's title/detail, which survive payload projection.
+ */
+const AGENT_CLI_PATTERNS: ReadonlyArray<readonly [label: string, pattern: RegExp]> = [
+  ["Codex", /(?:^|[\s;&|(])codex\s+(?:exec|e)\b/],
+  ["Claude", /(?:^|[\s;&|(])claude\b[^|;&]*\s(?:-p|--print)\b/],
+  ["Gemini", /(?:^|[\s;&|(])gemini\b[^|;&]*\s(?:-p|--prompt)\b/],
+  ["Cursor", /(?:^|[\s;&|(])cursor-agent\b[^|;&]*\s(?:-p|--print)\b/],
+  ["OpenCode", /(?:^|[\s;&|(])opencode\s+run\b/],
+  ["Grok", /(?:^|[\s;&|(])grok\b[^|;&]*\s(?:-p|--prompt)\b/],
+];
+
+const AGENT_MCP_SERVERS: ReadonlyArray<readonly [label: string, pattern: RegExp]> = [
+  ["Codex", /codex/],
+  ["Claude", /claude/],
+  ["Gemini", /gemini/],
+  ["Cursor", /cursor/],
+  ["OpenCode", /opencode/],
+  ["Grok", /grok/],
+  ["Antigravity", /antigravity/],
+];
+
+const TOOL_ITEM_STATUS: ReadonlyMap<string, RuntimeSubagentStatus> = new Map([
+  ["inProgress", "running"],
+  ["completed", "completed"],
+  ["failed", "failed"],
+  ["declined", "cancelled"],
+]);
+
+export function detectCrossProviderAgent(
+  payload: Record<string, unknown>,
+): { readonly provider: string; readonly title: string } | null {
+  const itemType = asString(payload.itemType);
+  const detail = asString(payload.detail) ?? "";
+  const title = asString(payload.title) ?? "";
+  if (itemType === "command_execution") {
+    const command = detail.replace(/^Bash:\s*/, "");
+    // Searching for an agent process is not launching one.
+    if (/\b(?:grep|pgrep|pkill|ps|which|man)\b/.test(command.split(/\s/)[0] ?? "")) return null;
+    for (const [provider, pattern] of AGENT_CLI_PATTERNS) {
+      if (pattern.test(command)) return { provider, title: bounded(command) };
+    }
+    return null;
+  }
+  if (itemType === "mcp_tool_call" || /^mcp__/.test(detail)) {
+    const server = /^mcp__(.+?)__/.exec(detail)?.[1] ?? /^mcp__(.+?)__/.exec(title)?.[1] ?? title;
+    const lower = server.toLowerCase();
+    for (const [provider, pattern] of AGENT_MCP_SERVERS) {
+      if (pattern.test(lower)) return { provider, title: bounded(detail || title) };
+    }
+  }
+  return null;
+}
+
+/**
  * Folds a thread's persisted activities into subagent state. Tolerant by
  * construction: malformed rows are skipped individually; unknown kinds are
  * ignored. Pure — memoize by activity-list identity at the atom layer.
@@ -624,6 +681,27 @@ export function foldSubagentActivities(
           agent.lastToolName = toolName;
           agent.recentActivity = appendActivity(agent.recentActivity, at, `▸ ${toolName}`);
         }
+        agent.updatedAt = at;
+        break;
+      }
+      case "tool.started":
+      case "tool.updated":
+      case "tool.completed": {
+        const toolCallId = asString(payload.toolCallId);
+        if (!toolCallId) break;
+        const id = `tool:${toolCallId}`;
+        let agent = agents.get(id);
+        if (!agent) {
+          const detected = detectCrossProviderAgent(payload);
+          if (!detected) break;
+          agent = getOrCreate(agents, id, { title: detected.title, role: detected.provider }, at);
+          agent.activationCount = 1;
+        }
+        const status =
+          TOOL_ITEM_STATUS.get(asString(payload.status) ?? "") ??
+          (activity.kind === "tool.completed" ? "completed" : "running");
+        // A tool call runs once: late in-progress rows never reopen it.
+        if (!isTerminalSubagentStatus(agent.status)) applyStatus(agent, status, at);
         agent.updatedAt = at;
         break;
       }
