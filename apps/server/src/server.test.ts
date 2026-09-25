@@ -186,6 +186,7 @@ import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryR
 import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClient.ts";
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as AccountUsage from "./agentLimits/AccountUsage.ts";
 import * as AgentLimits from "./agentLimits/AgentLimits.ts";
 import * as LocalLimitSources from "./agentLimits/LocalLimitSources.ts";
 import * as SpendLedger from "./agentLimits/SpendLedger.ts";
@@ -791,6 +792,10 @@ const buildAppUnderTest = (options?: {
       }),
       Layer.mock(LocalLimitSources.LocalLimitSources)({
         switchClaudeAccount: () => Effect.succeed({ switched: false }),
+      }),
+      Layer.mock(AccountUsage.AccountUsage)({
+        accounts: Stream.empty,
+        thread: () => Stream.empty,
       }),
       Layer.mock(SpendLedger.SpendLedger)({
         summarize: (input) =>

@@ -197,3 +197,25 @@ export function formatSpend(reportedUsd: number, estimatedUsd: number): string {
   const total = reportedUsd + estimatedUsd;
   return estimatedUsd > 0 ? `~${formatUsd(total)}` : formatUsd(total);
 }
+
+/** Meter shares are estimates split across turns, so one decimal is already generous. */
+export function formatSharePercent(value: number): string {
+  if (value <= 0) {
+    return "0%";
+  }
+  if (value < 0.1) {
+    return "<0.1%";
+  }
+  return value < 10 ? `${value.toFixed(1).replace(/\.0$/, "")}%` : `${Math.round(value)}%`;
+}
+
+/** "1.2M", "34k": token totals only need to be comparable at a glance. */
+export function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (tokens >= 1_000) {
+    return `${Math.round(tokens / 1_000)}k`;
+  }
+  return String(tokens);
+}

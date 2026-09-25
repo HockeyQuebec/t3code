@@ -124,7 +124,7 @@ function toSnapshotRow(tracked: TrackedProvider): ProviderLimitSnapshot {
  * session window is the short one that usually binds; anything longer is the
  * weekly-ish allowance.
  */
-function readWindows(
+export function readWindows(
   windows: ReadonlyArray<ServerProviderUsageWindow>,
   observedAt: number,
 ): AgentLimitState {
@@ -160,14 +160,29 @@ const make = () =>
       const readAt = yield* DateTime.now;
       const live = [...(yield* Ref.get(tracked)).values()].map(toSnapshotRow);
       const polledRows = [...(yield* Ref.get(polled)).values()].flat();
-      // A polled row per account beats one live row per driver: claude-swap
-      // already covers the running Claude account, and a live Codex event is
-      // fresher than the session log it will later be written to.
-      const polledDrivers = new Set(polledRows.map((row) => row.driver));
-      const liveDrivers = new Set(live.map((row) => row.driver));
+      // claude-swap has a row per Claude account, which already covers the
+      // running one, so its rows always replace the live Claude row. For other
+      // drivers the newest reading wins: a live event only arrives during a
+      // turn, while the Codex status probe keeps refreshing between them.
+      const newest = (rows: ReadonlyArray<ProviderLimitSnapshot>, driver: string) =>
+        Math.max(
+          -1,
+          ...rows
+            .filter((row) => row.driver === driver)
+            .map((row) =>
+              Option.match(row.observedAt, {
+                onNone: () => 0,
+                onSome: DateTime.toEpochMillis,
+              }),
+            ),
+        );
+      const liveWins = (driver: string) =>
+        driver === "claudeAgent"
+          ? newest(polledRows, driver) === -1
+          : newest(live, driver) >= newest(polledRows, driver);
       const providers = [
-        ...live.filter((row) => row.driver !== "claudeAgent" || !polledDrivers.has(row.driver)),
-        ...polledRows.filter((row) => row.driver === "claudeAgent" || !liveDrivers.has(row.driver)),
+        ...live.filter((row) => liveWins(row.driver)),
+        ...polledRows.filter((row) => !liveWins(row.driver)),
       ];
       return {
         readAt,

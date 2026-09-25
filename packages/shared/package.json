@@ -39,6 +39,10 @@
       "types": "./src/tokenPricing.ts",
       "import": "./src/tokenPricing.ts"
     },
+    "./accountUsage": {
+      "types": "./src/accountUsage.ts",
+      "import": "./src/accountUsage.ts"
+    },
     "./agentLimits": {
       "types": "./src/agentLimits.ts",
       "import": "./src/agentLimits.ts"

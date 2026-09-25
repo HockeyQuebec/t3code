@@ -246,8 +246,11 @@ import {
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
 import {
+  AccountUsageSnapshot,
   AgentLimitsSnapshot,
   SpendSummary,
+  ThreadUsageInput,
+  ThreadUsageSnapshot,
   SpendSummaryInput,
   SwitchClaudeAccountInput,
   SwitchClaudeAccountResult,
@@ -469,6 +472,8 @@ export const WS_METHODS = {
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
   subscribeAgentLimits: "subscribeAgentLimits",
+  subscribeAccountUsage: "subscribeAccountUsage",
+  subscribeThreadUsage: "subscribeThreadUsage",
   subscribeScheduledTurns: "subscribeScheduledTurns",
 } as const;
 
@@ -1437,6 +1442,20 @@ export const WsSubscribeAgentLimitsRpc = Rpc.make(WS_METHODS.subscribeAgentLimit
   stream: true,
 });
 
+export const WsSubscribeAccountUsageRpc = Rpc.make(WS_METHODS.subscribeAccountUsage, {
+  payload: Schema.Struct({}),
+  success: AccountUsageSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+export const WsSubscribeThreadUsageRpc = Rpc.make(WS_METHODS.subscribeThreadUsage, {
+  payload: ThreadUsageInput,
+  success: ThreadUsageSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 export const WsServerSwitchClaudeAccountRpc = Rpc.make(WS_METHODS.serverSwitchClaudeAccount, {
   payload: SwitchClaudeAccountInput,
   success: SwitchClaudeAccountResult,
@@ -1616,6 +1635,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
   WsSubscribeAgentLimitsRpc,
+  WsSubscribeAccountUsageRpc,
+  WsSubscribeThreadUsageRpc,
   WsSubscribeScheduledTurnsRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetWorkflowScriptRpc,

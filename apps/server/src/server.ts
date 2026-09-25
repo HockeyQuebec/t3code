@@ -49,6 +49,7 @@ import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as CodexResetCredit from "./provider/Layers/codexResetCredit.ts";
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
+import * as AccountUsage from "./agentLimits/AccountUsage.ts";
 import * as AgentLimits from "./agentLimits/AgentLimits.ts";
 import * as LocalLimitSources from "./agentLimits/LocalLimitSources.ts";
 import * as SpendLedger from "./agentLimits/SpendLedger.ts";
@@ -471,7 +472,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
 // Local tools (claude-swap, Codex session logs, the Cursor CLI) top the limits
 // up with accounts no turn is running on.
 const AgentTelemetryLayerLive = Layer.mergeAll(
-  LocalLimitSources.layer.pipe(
+  Layer.mergeAll(LocalLimitSources.layer, AccountUsage.layer).pipe(
     Layer.provideMerge(AgentLimits.layer),
     Layer.provide(ProcessRunner.layer),
   ),

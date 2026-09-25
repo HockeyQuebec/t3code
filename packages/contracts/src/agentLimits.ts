@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 /**
@@ -149,3 +149,63 @@ export const SpendSummary = Schema.Struct({
   assumptions: Schema.Array(SpendRateAssumption),
 });
 export type SpendSummary = typeof SpendSummary.Type;
+
+/**
+ * What this device ran on one metered account.
+ *
+ * Percentages are estimates: a meter rise is split across this device's turns
+ * by cost, and a rise no local turn explains is `other*` (another device on the
+ * same account). The `window*` and percent figures cover the current window.
+ */
+export const AccountUsageEntry = Schema.Struct({
+  account: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  driver: ProviderDriverKind,
+  turns: NonNegativeInt,
+  tokens: NonNegativeInt,
+  costUsd: Schema.Number,
+  windowTurns: NonNegativeInt,
+  windowTokens: NonNegativeInt,
+  windowCostUsd: Schema.Number,
+  fiveHourPercent: Schema.Number,
+  weeklyPercent: Schema.Number,
+  otherFiveHourPercent: Schema.Number,
+  otherWeeklyPercent: Schema.Number,
+});
+export type AccountUsageEntry = typeof AccountUsageEntry.Type;
+
+export const AccountUsageSnapshot = Schema.Struct({
+  readAt: Schema.DateTimeUtc,
+  /** The oldest turn still on record. */
+  since: Schema.Option(Schema.DateTimeUtc),
+  accounts: Schema.Array(AccountUsageEntry),
+});
+export type AccountUsageSnapshot = typeof AccountUsageSnapshot.Type;
+
+export const ThreadUsageInput = Schema.Struct({ threadId: ThreadId });
+export type ThreadUsageInput = typeof ThreadUsageInput.Type;
+
+/** One chat's share of an account. `windowFiveHourPercent` is the current 5h window only. */
+export const ThreadAccountUsage = Schema.Struct({
+  account: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  turns: NonNegativeInt,
+  tokens: SpendTokens,
+  costUsd: Schema.Number,
+  fiveHourPercent: Schema.Number,
+  windowFiveHourPercent: Schema.Number,
+  weeklyPercent: Schema.Number,
+});
+export type ThreadAccountUsage = typeof ThreadAccountUsage.Type;
+
+export const ThreadUsageSnapshot = Schema.Struct({
+  threadId: ThreadId,
+  turns: NonNegativeInt,
+  tokens: SpendTokens,
+  costUsd: Schema.Number,
+  fiveHourPercent: Schema.Number,
+  windowFiveHourPercent: Schema.Number,
+  weeklyPercent: Schema.Number,
+  byAccount: Schema.Array(ThreadAccountUsage),
+});
+export type ThreadUsageSnapshot = typeof ThreadUsageSnapshot.Type;

@@ -1,4 +1,4 @@
-import type { HarnessCatalogInput, SpendSummaryInput } from "@t3tools/contracts";
+import type { HarnessCatalogInput, SpendSummaryInput, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { useCallback } from "react";
 
@@ -18,6 +18,26 @@ export function useAgentLimits() {
   const environmentId = primaryEnvironment?.environmentId ?? null;
   return useEnvironmentQuery(
     environmentId === null ? null : serverEnvironment.agentLimits({ environmentId, input: {} }),
+  );
+}
+
+/** What this device has run on each metered account. */
+export function useAccountUsage() {
+  const primaryEnvironment = usePrimaryEnvironment();
+  const environmentId = primaryEnvironment?.environmentId ?? null;
+  return useEnvironmentQuery(
+    environmentId === null ? null : serverEnvironment.accountUsage({ environmentId, input: {} }),
+  );
+}
+
+/** One chat's tokens, cost, and estimated share of each account's meters. */
+export function useThreadUsage(threadId: ThreadId | null) {
+  const primaryEnvironment = usePrimaryEnvironment();
+  const environmentId = primaryEnvironment?.environmentId ?? null;
+  return useEnvironmentQuery(
+    environmentId === null || threadId === null
+      ? null
+      : serverEnvironment.threadUsage({ environmentId, input: { threadId } }),
   );
 }
 

@@ -1,12 +1,22 @@
 import { memo, useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 
-import { useAgentLimits, useSwitchClaudeAccount } from "../../lib/agentLimitsState";
+import type { AccountUsageEntry } from "@t3tools/contracts";
+
 import {
+  useAccountUsage,
+  useAgentLimits,
+  useSwitchClaudeAccount,
+} from "../../lib/agentLimitsState";
+import {
+  formatSharePercent,
+  formatTokenCount,
+  formatUsd,
   type LimitAccountDisplay,
   type LimitWindowDisplay,
   toLimitAccounts,
 } from "../../lib/agentLimitsView";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /** Countdowns are minute-grained at best, so a slow tick is enough and keeps repaints rare. */
 const TICK_MS = 30_000;
@@ -36,6 +46,36 @@ function shortLabel(label: string): string {
   return at > 0 ? label.slice(0, at) : label;
 }
 
+/** How much of the account this device used, next to what others on it used. */
+function deviceUsageLine(usage: AccountUsageEntry | undefined): string | null {
+  if (usage === undefined || (usage.windowTurns === 0 && usage.otherFiveHourPercent === 0)) {
+    return null;
+  }
+  const parts = [`this device ${formatSharePercent(usage.fiveHourPercent)}`];
+  if (usage.windowCostUsd > 0) {
+    parts.push(`~${formatUsd(usage.windowCostUsd)}`);
+  }
+  if (usage.otherFiveHourPercent > 0) {
+    parts.push(`others ${formatSharePercent(usage.otherFiveHourPercent)}`);
+  }
+  return parts.join(" · ");
+}
+
+function deviceUsageTitle(
+  label: string,
+  usage: AccountUsageEntry | undefined,
+): ReadonlyArray<string> {
+  if (usage === undefined) {
+    return [label];
+  }
+  return [
+    label,
+    `This 5h window: ${formatSharePercent(usage.fiveHourPercent)} from this device (${usage.windowTurns} turns, ${formatTokenCount(usage.windowTokens)} tokens, ~${formatUsd(usage.windowCostUsd)}), ${formatSharePercent(usage.otherFiveHourPercent)} from other devices`,
+    `This week: ${formatSharePercent(usage.weeklyPercent)} from this device, ${formatSharePercent(usage.otherWeeklyPercent)} from other devices`,
+    `On record: ${usage.turns} turns, ${formatTokenCount(usage.tokens)} tokens, ~${formatUsd(usage.costUsd)} at API rates`,
+  ];
+}
+
 /**
  * Subscription headroom for every account the server knows about — each
  * claude-swap Claude account, ChatGPT/Codex, and Cursor's plan — pinned above
@@ -43,6 +83,7 @@ function shortLabel(label: string): string {
  */
 export const SidebarUsageLimits = memo(function SidebarUsageLimits() {
   const { data } = useAgentLimits();
+  const { data: usageData } = useAccountUsage();
   const switchClaudeAccount = useSwitchClaudeAccount();
   const [switchingTo, setSwitchingTo] = useState<number | null>(null);
   const [nowMillis, setNowMillis] = useState(() => Date.now());
@@ -74,6 +115,9 @@ export const SidebarUsageLimits = memo(function SidebarUsageLimits() {
       {accounts.map((account) => {
         const target = switchTarget(account);
         const switching = target !== null && switchingTo === target;
+        const usage = usageData?.accounts.find((entry) => entry.account === account.instanceId);
+        const deviceLine = deviceUsageLine(usage);
+        const title = deviceUsageTitle(account.label, usage);
         const body = (
           <>
             <div className="flex min-w-0 items-baseline gap-1.5">
@@ -104,31 +148,41 @@ export const SidebarUsageLimits = memo(function SidebarUsageLimits() {
                 ))}
               </div>
             ) : null}
+            {deviceLine !== null ? (
+              <div className="truncate text-muted-foreground/50 tabular-nums">{deviceLine}</div>
+            ) : null}
           </>
         );
-        if (target === null) {
-          return (
-            <div key={account.instanceId} className="flex flex-col" title={account.label}>
+        const row =
+          target === null ? (
+            <div className="flex flex-col">{body}</div>
+          ) : (
+            <button
+              type="button"
+              className="-mx-1 flex flex-col rounded px-1 text-left hover:bg-accent disabled:opacity-60"
+              disabled={switchingTo !== null}
+              onClick={() => {
+                setSwitchingTo(target);
+                void switchClaudeAccount(target)
+                  .catch(() => false)
+                  .finally(() => setSwitchingTo(null));
+              }}
+            >
               {body}
-            </div>
+            </button>
           );
-        }
         return (
-          <button
-            key={account.instanceId}
-            type="button"
-            className="-mx-1 flex flex-col rounded px-1 text-left hover:bg-accent disabled:opacity-60"
-            title={`${account.label} — click to switch claude-swap to this account`}
-            disabled={switchingTo !== null}
-            onClick={() => {
-              setSwitchingTo(target);
-              void switchClaudeAccount(target)
-                .catch(() => false)
-                .finally(() => setSwitchingTo(null));
-            }}
-          >
-            {body}
-          </button>
+          <Tooltip key={account.instanceId}>
+            <TooltipTrigger render={row} />
+            <TooltipPopup side="right">
+              <div className="flex max-w-80 flex-col gap-0.5">
+                {title.map((line) => (
+                  <span key={line}>{line}</span>
+                ))}
+                {target !== null ? <span>Click to switch claude-swap to this account</span> : null}
+              </div>
+            </TooltipPopup>
+          </Tooltip>
         );
       })}
     </div>

@@ -151,6 +151,7 @@ import { requiredScopeForRpcMethod, requiredScopeForDeviceList } from "./auth/Rp
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as AccountUsage from "./agentLimits/AccountUsage.ts";
 import * as AgentLimits from "./agentLimits/AgentLimits.ts";
 import * as LocalLimitSources from "./agentLimits/LocalLimitSources.ts";
 import * as SpendLedger from "./agentLimits/SpendLedger.ts";
@@ -671,6 +672,7 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const agentLimits = yield* AgentLimits.AgentLimits;
+      const accountUsage = yield* AccountUsage.AccountUsage;
       const spendLedger = yield* SpendLedger.SpendLedger;
       const localLimitSources = yield* LocalLimitSources.LocalLimitSources;
       const harnessCatalog = yield* HarnessCatalog.HarnessCatalogService;
@@ -3809,6 +3811,14 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.subscribeAccountUsage]: (_input) =>
+          observeRpcStream(WS_METHODS.subscribeAccountUsage, accountUsage.accounts, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.subscribeThreadUsage]: (input) =>
+          observeRpcStream(WS_METHODS.subscribeThreadUsage, accountUsage.thread(input.threadId), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.subscribeAgentLimits]: (_input) =>
           observeRpcStream(
             WS_METHODS.subscribeAgentLimits,

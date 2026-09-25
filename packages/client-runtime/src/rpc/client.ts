@@ -55,6 +55,8 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeDeviceState
   | typeof WS_METHODS.subscribeResourceTelemetry
   | typeof WS_METHODS.subscribeAgentLimits
+  | typeof WS_METHODS.subscribeAccountUsage
+  | typeof WS_METHODS.subscribeThreadUsage
   | typeof WS_METHODS.subscribeScheduledTurns
   | typeof WS_METHODS.pullRequestsSubscribeRefreshes
   | typeof WS_METHODS.previewAutomationConnect

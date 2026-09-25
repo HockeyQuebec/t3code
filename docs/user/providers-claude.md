@@ -61,6 +61,17 @@ Claude Code holds the turn until that window reopens, so it can keep showing as
 working. Wait for the reset, or stop the turn and continue later. The warning's
 timestamp shows when the displayed wait started.
 
+If you rotate accounts with claude-swap, the sidebar's limits list each account
+along with how much of its 5h window this device used and how much came from
+other devices. Hover the context meter to see a chat's cost at API rates and
+its share of the 5h window. Shares are estimates: each rise in an account's
+meter is split across the chats that ran on it, weighted by cost.
+
+To keep an account in reserve, open **Settings → Usage** and set a 5h ceiling
+for it under **Claude account switching**. Once the active account reaches its
+ceiling, T3 Code switches to the account with the most room left under its own
+ceiling. An account with no ceiling runs until it is full.
+
 ## Skills
 
 Claude skills come from the config directory's `skills` folder and the project's

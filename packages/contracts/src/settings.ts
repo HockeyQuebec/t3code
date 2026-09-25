@@ -1249,6 +1249,11 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+/** A 5h usage percentage an account is switched away from at. */
+export const ClaudeAutoSwitchThreshold = Schema.Number.pipe(
+  Schema.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
+);
+
 export const ServerSettings = Schema.Struct({
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
@@ -1453,6 +1458,13 @@ export const ServerSettings = Schema.Struct({
   ),
   /** Exact model IDs, applied to past and future usage on this environment. */
   usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  /**
+   * Per claude-swap account (keyed by email), the 5h usage at which T3 Code
+   * switches to another account. Accounts without an entry run until full.
+   */
+  claudeAutoSwitchThresholds: Schema.Record(TrimmedNonEmptyString, ClaudeAutoSwitchThreshold).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
 });
@@ -1778,6 +1790,10 @@ export const ServerSettingsPatch = Schema.Struct({
   /** Each entry replaces one model's rates; `null` restores automatic pricing. */
   usagePriceOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),
+  ),
+  /** Per account; `null` lets that account run until full again. */
+  claudeAutoSwitchThresholds: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, Schema.NullOr(ClaudeAutoSwitchThreshold)),
   ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;

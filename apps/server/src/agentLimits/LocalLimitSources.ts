@@ -2,6 +2,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderLimitSnapshot,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import {
   type AgentLimitState,
@@ -20,11 +21,17 @@ import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as NodeOS from "node:os";
 
+import { chooseClaudeSwitch } from "@t3tools/shared/accountUsage";
+
 import { ProcessRunner } from "../processRunner.ts";
-import { AgentLimits, toWindow } from "./AgentLimits.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
+import { AgentLimits, readWindows, toWindow } from "./AgentLimits.ts";
 
 /**
  * Limits for accounts T3 Code is not currently running a turn on.
@@ -95,6 +102,8 @@ const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unkno
 const make = Effect.gen(function* () {
   const agentLimits = yield* AgentLimits;
   const processRunner = yield* ProcessRunner;
+  const providerRegistry = yield* ProviderRegistry;
+  const settings = yield* ServerSettingsService;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -152,10 +161,11 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
-  const pollCswap = Effect.gen(function* () {
+  const readCswap = Effect.gen(function* () {
     const stdout = yield* runJson("cswap", ["list", "--json"]);
     const parsed = stdout === null ? null : Option.getOrNull(decodeJson(stdout));
-    const rows = parseCswapList(parsed).map((account) =>
+    const accounts = parseCswapList(parsed);
+    const rows = accounts.map((account) =>
       row({
         instanceId: `cswap-${account.number}`,
         driver: "claudeAgent",
@@ -167,9 +177,85 @@ const make = Effect.gen(function* () {
       }),
     );
     yield* agentLimits.setPolled("cswap", rows);
+    return accounts;
   });
 
+  const runSwitch = (cswapAccount: number) =>
+    processRunner
+      .run({ command: "cswap", args: ["switch", String(cswapAccount)], timeout: "30 seconds" })
+      .pipe(
+        Effect.map((output) => output.code === 0),
+        Effect.orElseSucceed(() => false),
+        Effect.tap(() => readCswap),
+      );
+
+  // Leaves an account once it reaches the 5h ceiling set for it in settings,
+  // so one account can be kept in reserve while another is used up.
+  const pollCswap = Effect.gen(function* () {
+    const accounts = yield* readCswap;
+    const thresholds = yield* settings.getSettings.pipe(
+      Effect.map((current) => current.claudeAutoSwitchThresholds),
+      Effect.orElseSucceed(() => ({})),
+    );
+    if (Object.keys(thresholds).length === 0) return;
+    const toMeter = (window: AgentLimitState["short"]) =>
+      window === null
+        ? null
+        : {
+            usedPercent: window.usedPercent,
+            resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
+          };
+    const target = chooseClaudeSwitch(
+      accounts.map((account) => ({
+        number: account.number,
+        email: account.email,
+        active: account.active,
+        fiveHour: toMeter(account.state.short),
+        weekly: toMeter(account.state.long),
+      })),
+      thresholds,
+      DateTime.toEpochMillis(yield* DateTime.now),
+    );
+    if (target !== null) {
+      yield* Effect.logInfo("switching claude-swap account at its usage ceiling", { target });
+      yield* runSwitch(target);
+    }
+  });
+
+  // Codex's own `account/rateLimits/read`, run by the provider status probe.
+  // Session logs only update when a turn runs, so they go stale between turns;
+  // the log is read only while no probe has answered.
+  const probedCodex = yield* Ref.make(false);
+  const publishCodexProbe = (providers: ReadonlyArray<ServerProvider>) =>
+    Effect.gen(function* () {
+      const rows = providers.flatMap((provider) => {
+        const usage = provider.usageLimits;
+        if (provider.driver !== "codex" || !provider.enabled || usage === undefined) {
+          return [];
+        }
+        const state = readWindows(usage.windows, Date.parse(usage.checkedAt) / 1000);
+        return state === EMPTY_LIMIT_STATE
+          ? []
+          : [
+              row({
+                instanceId: provider.instanceId,
+                driver: "codex",
+                label: provider.displayName ?? "ChatGPT",
+                state,
+              }),
+            ];
+      });
+      if (rows.length === 0) {
+        return;
+      }
+      yield* Ref.set(probedCodex, true);
+      yield* agentLimits.setPolled("codex-session", rows);
+    });
+
   const pollCodex = Effect.gen(function* () {
+    if (yield* Ref.get(probedCodex)) {
+      return;
+    }
     const tail = yield* readNewestCodexSessionTail.pipe(Effect.orElseSucceed(() => null));
     const { state, planType } =
       tail === null ? { state: EMPTY_LIMIT_STATE, planType: null } : parseCodexSessionLimits(tail);
@@ -208,6 +294,12 @@ const make = Effect.gen(function* () {
     );
   });
 
+  yield* providerRegistry.getProviders.pipe(Effect.flatMap(publishCodexProbe));
+  yield* providerRegistry.streamChanges.pipe(
+    Stream.runForEach(publishCodexProbe),
+    Effect.forkScoped,
+  );
+
   for (const [poll, interval] of [
     [pollCswap, CSWAP_INTERVAL],
     [pollCodex, CODEX_INTERVAL],
@@ -217,14 +309,7 @@ const make = Effect.gen(function* () {
   }
 
   const switchClaudeAccount = (cswapAccount: number) =>
-    processRunner
-      .run({ command: "cswap", args: ["switch", String(cswapAccount)], timeout: "30 seconds" })
-      .pipe(
-        Effect.map((output) => output.code === 0),
-        Effect.orElseSucceed(() => false),
-        Effect.tap(() => pollCswap),
-        Effect.map((switched) => ({ switched })),
-      );
+    runSwitch(cswapAccount).pipe(Effect.map((switched) => ({ switched })));
 
   return LocalLimitSources.of({ switchClaudeAccount });
 });

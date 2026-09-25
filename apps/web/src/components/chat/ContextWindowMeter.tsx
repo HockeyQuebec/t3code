@@ -3,6 +3,9 @@ import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/con
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { formatContextWindowCompactionMessage } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
+import type { ThreadId, ThreadUsageSnapshot } from "@t3tools/contracts";
+import { useThreadUsage } from "~/lib/agentLimitsState";
+import { formatSharePercent, formatTokenCount, formatUsd } from "~/lib/agentLimitsView";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 function formatPercentage(value: number | null): string | null {
@@ -15,14 +18,74 @@ function formatPercentage(value: number | null): string | null {
   return `${Math.round(value)}%`;
 }
 
+/** Whose tokens this chat spent, what they would cost at API rates, and its share of the 5h meter. */
+function ThreadUsageDetails({ usage }: { usage: ThreadUsageSnapshot }) {
+  const splitAccounts = usage.byAccount.length > 1;
+  return (
+    <div className="flex flex-col gap-1 border-border/60 border-t pt-2 text-[11px] leading-4">
+      <div className="font-medium text-muted-foreground text-xs">This chat</div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-secondary-label">5h used, this window</span>
+        <span className="font-medium tabular-nums text-secondary-label">
+          {formatSharePercent(usage.windowFiveHourPercent)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-secondary-label">5h used, all time</span>
+        <span className="tabular-nums text-secondary-label">
+          {formatSharePercent(usage.fiveHourPercent)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-secondary-label">Weekly used</span>
+        <span className="tabular-nums text-secondary-label">
+          {formatSharePercent(usage.weeklyPercent)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-secondary-label">Cost at API rates</span>
+        <span className="font-medium tabular-nums text-secondary-label">
+          ~{formatUsd(usage.costUsd)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-secondary-label">Tokens ({usage.turns} turns)</span>
+        <span className="tabular-nums text-secondary-label">
+          {formatTokenCount(usage.tokens.totalTokens)}
+        </span>
+      </div>
+      <div className="text-secondary-label/70 tabular-nums">
+        in {formatTokenCount(usage.tokens.inputTokens)} · out{" "}
+        {formatTokenCount(usage.tokens.outputTokens)} · cache{" "}
+        {formatTokenCount(usage.tokens.cacheReadTokens + usage.tokens.cacheWriteTokens)}
+      </div>
+      {usage.byAccount.map((account) => (
+        <div
+          key={account.account}
+          className="flex items-center justify-between gap-3 text-secondary-label/80"
+        >
+          <span className="truncate">{account.label}</span>
+          <span className="shrink-0 tabular-nums">
+            {splitAccounts ? `~${formatUsd(account.costUsd)} · ` : ""}
+            {formatSharePercent(account.windowFiveHourPercent)} of 5h
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
+  threadId?: ThreadId | null | undefined;
   modelDisplayName?: string | null;
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
 }) {
   const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
+  const { data: threadUsage } = useThreadUsage(props.threadId ?? null);
+  const hasThreadUsage = threadUsage !== null && threadUsage.turns > 0;
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
@@ -87,6 +150,12 @@ export function ContextWindowMeter(props: {
                   /{formatContextWindowTokens(usage.maxTokens ?? null)}
                 </span>
               ) : null}
+              {hasThreadUsage && threadUsage.windowFiveHourPercent > 0 ? (
+                <span className="text-muted-foreground/50">
+                  {" "}
+                  · {formatSharePercent(threadUsage.windowFiveHourPercent)}
+                </span>
+              ) : null}
             </span>
           </Button>
         }
@@ -140,6 +209,7 @@ export function ContextWindowMeter(props: {
               </span>
             </div>
           ) : null}
+          {hasThreadUsage ? <ThreadUsageDetails usage={threadUsage} /> : null}
           {usage.compactsAutomatically ? (
             <div className="mt-1 text-pretty text-secondary-label text-[11px] font-medium">
               {formatContextWindowCompactionMessage(modelDisplayName, usage.autoCompactThreshold)}

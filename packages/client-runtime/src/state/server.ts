@@ -1047,6 +1047,17 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.subscribeAgentLimits,
       idleTtlMs: 0,
     }),
+    // Changes once per finished turn or meter reading at most.
+    accountUsage: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:account-usage",
+      tag: WS_METHODS.subscribeAccountUsage,
+      idleTtlMs: 0,
+    }),
+    threadUsage: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:thread-usage",
+      tag: WS_METHODS.subscribeThreadUsage,
+      idleTtlMs: 0,
+    }),
     switchClaudeAccount: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:switch-claude-account",
       tag: WS_METHODS.serverSwitchClaudeAccount,

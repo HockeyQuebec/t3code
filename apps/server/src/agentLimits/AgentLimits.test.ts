@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -191,6 +192,29 @@ describe("AgentLimits", () => {
         "cswap-1",
         "cswap-2",
       ]);
+    }),
+  );
+  effectIt.live("prefers a newer probed Codex reading over the last turn's event", () =>
+    Effect.gen(function* () {
+      const stub = yield* makeProviderServiceStub;
+
+      const result = yield* Effect.gen(function* () {
+        const limits = yield* AgentLimits.AgentLimits;
+        yield* subscribed;
+        yield* PubSub.publish(
+          stub.events,
+          rateLimitEvent("codex", [{ kind: "session", usedPercent: 21 }]),
+        );
+        yield* settle;
+        const liveRow = (yield* limits.latest).providers[0]!;
+        const later = Option.map(liveRow.observedAt, (at) => DateTime.add(at, { minutes: 5 }));
+        yield* limits.setPolled("codex-session", [
+          { ...liveRow, label: "ChatGPT", observedAt: later },
+        ]);
+        return yield* limits.latest;
+      }).pipe(Effect.provide(AgentLimits.layer.pipe(Layer.provide(stub.layer))), Effect.scoped);
+
+      expect(result.providers.map((provider) => provider.label)).toEqual(["ChatGPT"]);
     }),
   );
 });

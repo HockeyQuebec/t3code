@@ -133,6 +133,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.worktreeSetupCancel]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeResourceTelemetry]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeAgentLimits]: AuthOrchestrationReadScope,
+  [WS_METHODS.subscribeAccountUsage]: AuthOrchestrationReadScope,
+  [WS_METHODS.subscribeThreadUsage]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeScheduledTurns]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsRefreshStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsPull]: AuthOrchestrationOperateScope,

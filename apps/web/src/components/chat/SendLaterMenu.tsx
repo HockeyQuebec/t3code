@@ -1,11 +1,15 @@
 import { ClockIcon } from "lucide-react";
 import { useState } from "react";
+import type { ProviderLimitSnapshot } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 
 import {
   resolvePresetMillis,
   SEND_LATER_PRESETS,
   type SendLaterPresetId,
 } from "~/lib/scheduledTurnsState";
+import { useAgentLimits } from "~/lib/agentLimitsState";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
@@ -49,6 +53,46 @@ export function buildSendLaterOptions(nowMillis: number): ReadonlyArray<SendLate
   });
 }
 
+/** Past the reset so the first request lands in the fresh window. */
+const RESET_SLACK_MS = 15_000;
+
+export interface LimitResetOption {
+  readonly key: string;
+  readonly label: string;
+  readonly runAtMillis: number;
+}
+
+/** Emails are long and the menu is not. */
+function accountLabel(label: string): string {
+  const at = label.indexOf("@");
+  return at > 0 ? label.slice(0, at) : label;
+}
+
+/**
+ * One "when it resets" choice per account with a known upcoming reset. The
+ * binding window is the one actually blocking work, so its reset is the one
+ * worth waiting for; the 5h window stands in when nothing binds yet.
+ */
+export function buildLimitResetOptions(
+  providers: ReadonlyArray<ProviderLimitSnapshot>,
+  nowMillis: number,
+): ReadonlyArray<LimitResetOption> {
+  return providers.flatMap((provider) => {
+    const window = Option.getOrNull(Option.orElse(provider.binding, () => provider.short));
+    const resetsAt = window === null ? null : Option.getOrNull(window.resetsAt);
+    if (resetsAt === null) return [];
+    const millis = DateTime.toEpochMillis(resetsAt);
+    if (millis <= nowMillis) return [];
+    return [
+      {
+        key: provider.instanceId,
+        label: `When ${accountLabel(provider.label)} resets`,
+        runAtMillis: millis + RESET_SLACK_MS,
+      },
+    ];
+  });
+}
+
 /** What a menu click does, so the behaviour is testable without a DOM. */
 export function schedulePreset(
   onSchedule: (runAtIso: string) => void | Promise<void>,
@@ -61,13 +105,16 @@ export function schedulePreset(
 export function SendLaterMenu({ disabled, onSchedule }: SendLaterMenuProps) {
   const [customValue, setCustomValue] = useState("");
   const [showCustom, setShowCustom] = useState(false);
+  const { data: limits } = useAgentLimits();
 
   // Never offer a control that cannot do anything.
   if (onSchedule === null) {
     return null;
   }
 
-  const options = buildSendLaterOptions(Date.now());
+  const nowMillis = Date.now();
+  const options = buildSendLaterOptions(nowMillis);
+  const resetOptions = buildLimitResetOptions(limits?.providers ?? [], nowMillis);
 
   const submitCustom = () => {
     if (customValue === "") {
@@ -106,6 +153,16 @@ export function SendLaterMenu({ disabled, onSchedule }: SendLaterMenuProps) {
           >
             <span>{option.label}</span>
             <span className="text-muted-foreground">· {option.timeLabel}</span>
+          </MenuItem>
+        ))}
+        {resetOptions.map((option) => (
+          <MenuItem
+            key={option.key}
+            disabled={disabled}
+            onClick={() => void onSchedule(new Date(option.runAtMillis).toISOString())}
+          >
+            <span>{option.label}</span>
+            <span className="text-muted-foreground">· {formatShortTime(option.runAtMillis)}</span>
           </MenuItem>
         ))}
         {showCustom ? (

@@ -1,4 +1,10 @@
-import { AlertTriangleIcon, BoltIcon, CreditCardIcon, RefreshCwIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ArrowLeftRightIcon,
+  BoltIcon,
+  CreditCardIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
@@ -13,6 +19,7 @@ import { useAgentLimits, useHarnessCatalog, useSpendSummary } from "../../lib/ag
 import { formatSpend, formatUsd, rankLimits } from "../../lib/agentLimitsView";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsSection } from "./settingsLayout";
 import { HarnessRoleControls, type HarnessRoleOverrides } from "./HarnessRoleControls";
@@ -596,6 +603,87 @@ function HarnessSection({
   );
 }
 
+/** One claude-swap account's 5h ceiling; empty means run it until it is full. */
+function AutoSwitchThresholdInput({
+  email,
+  threshold,
+  onCommit,
+}: {
+  email: string;
+  threshold: number | undefined;
+  onCommit: (email: string, value: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(threshold === undefined ? "" : String(threshold));
+  const commit = () => {
+    const trimmed = draft.trim();
+    const parsed = trimmed === "" ? null : Number(trimmed);
+    if (parsed !== null && (!Number.isFinite(parsed) || parsed < 1 || parsed > 100)) {
+      setDraft(threshold === undefined ? "" : String(threshold));
+      return;
+    }
+    const next = parsed === null || parsed >= 100 ? null : parsed;
+    if (next !== (threshold ?? null)) onCommit(email, next);
+  };
+  return (
+    <Input
+      className="w-20"
+      inputMode="numeric"
+      placeholder="100"
+      aria-label={`5h usage to switch away from ${email} at`}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") commit();
+      }}
+    />
+  );
+}
+
+function AutoSwitchSection(): ReactNode {
+  const { data } = useAgentLimits();
+  const thresholds = usePrimarySettings((settings) => settings.claudeAutoSwitchThresholds);
+  const updateSettings = useUpdatePrimarySettings();
+  const accounts = (data?.providers ?? []).filter((row) => row.cswapAccount !== undefined);
+  if (accounts.length < 2) {
+    return null;
+  }
+  return (
+    <SettingsSection
+      title="Claude account switching"
+      icon={<ArrowLeftRightIcon className="size-4 text-muted-foreground" />}
+    >
+      <div className="flex flex-col gap-3 px-4 py-3 text-xs">
+        <p className="text-muted-foreground">
+          When the active claude-swap account reaches its 5h ceiling, T3 Code switches to the
+          account with the most room left under its own ceiling. Leave a ceiling empty to use that
+          account until it is full.
+        </p>
+        {accounts.map((row) => (
+          <div key={row.instanceId} className="flex items-center justify-between gap-3">
+            <span className="truncate">
+              {row.label}
+              {row.active ? <span className="ml-2 text-primary">active</span> : null}
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+              switch at
+              <AutoSwitchThresholdInput
+                key={thresholds[row.label] ?? "none"}
+                email={row.label}
+                threshold={thresholds[row.label]}
+                onCommit={(email, value) =>
+                  updateSettings({ claudeAutoSwitchThresholds: { [email]: value } })
+                }
+              />
+              % of 5h
+            </span>
+          </div>
+        ))}
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function AgentUsageSettings({ cwd }: { cwd?: string | null } = {}): ReactNode {
   const projects = useProjects();
   const [selectedRoot, setSelectedRoot] = useState<string | null>(null);
@@ -607,6 +695,7 @@ export function AgentUsageSettings({ cwd }: { cwd?: string | null } = {}): React
   return (
     <>
       <ProvidersSection />
+      <AutoSwitchSection />
       <SpendSection />
       <HarnessSection
         cwd={resolvedCwd}
