@@ -930,4 +930,25 @@ describe("cross-provider agents", () => {
     ]);
     expect(agents.map((agent) => [agent.role, agent.status])).toEqual([["Claude", "running"]]);
   });
+
+  it("surfaces headless Pi workers, direct or through delegate, but not lookalikes", () => {
+    const agents = foldSubagentActivities(
+      [
+        'Bash: pi --mode json --no-session --model ollama/qwen3-coder-48k -p "find callers"',
+        "Bash: ~/.local/bin/delegate build /tmp/task.md -- vp test run src/a.test.ts",
+        "Bash: pip install -p requests",
+        "Bash: delegate apply /tmp/worktree",
+      ].map((detail, index) =>
+        activity("tool.started", {
+          itemType: "command_execution",
+          toolCallId: `pi-${index}`,
+          detail,
+        }),
+      ),
+    );
+    expect(agents.map((agent) => [agent.id, agent.role])).toEqual([
+      ["tool:pi-0", "Pi"],
+      ["tool:pi-1", "Pi"],
+    ]);
+  });
 });

@@ -141,6 +141,10 @@ Scheduled work is stored on the server, so it runs whether or not the app is ope
 browser, locking the laptop, or restarting the server does not lose it. The server checks for due
 work every fifteen seconds.
 
+A sleeping computer cannot run anything, and work that comes due while it sleeps starts as soon as it
+wakes. While the desktop app has a window open and work is queued, it keeps the computer from falling
+asleep on its own. Closing a laptop's lid still puts it to sleep.
+
 **Settings → Usage** lists everything queued, with a countdown and a Cancel button. A scheduled turn
 that could not start stays in that list with the reason it failed, rather than disappearing.
 

@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     return () => ipcRenderer.removeListener(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, handler);
   },
   setMenuBarState: (state) => ipcRenderer.invoke(IpcChannels.SET_MENU_BAR_STATE_CHANNEL, state),
+  setKeepAwake: (keepAwake) => ipcRenderer.invoke(IpcChannels.SET_KEEP_AWAKE_CHANNEL, keepAwake),
   getSystemLocale: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL);
     return typeof result === "string" ? result : null;

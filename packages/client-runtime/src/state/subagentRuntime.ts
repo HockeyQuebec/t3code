@@ -462,6 +462,9 @@ const AGENT_CLI_PATTERNS: ReadonlyArray<readonly [label: string, pattern: RegExp
   ["Cursor", /(?:^|[\s;&|(])cursor-agent\b[^|;&]*\s(?:-p|--print)\b/],
   ["OpenCode", /(?:^|[\s;&|(])opencode\s+run\b/],
   ["Grok", /(?:^|[\s;&|(])grok\b[^|;&]*\s(?:-p|--prompt)\b/],
+  ["Pi", /(?:^|[\s;&|(])pi\b[^|;&]*\s(?:-p|--print|--mode\s+json)\b/],
+  // `delegate` wraps headless Pi workers (scout/build) behind its own verification.
+  ["Pi", /(?:^|[\s;&|(/])delegate\s+(?:scout|build)\b/],
 ];
 
 const AGENT_MCP_SERVERS: ReadonlyArray<readonly [label: string, pattern: RegExp]> = [

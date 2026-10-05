@@ -1149,6 +1149,8 @@ export interface DesktopBridge {
   onNotificationBadgeClear?: (listener: () => void) => () => void;
   /** Replaces the menu bar item's contents; `null` removes the item. */
   setMenuBarState?: (state: DesktopMenuBarState | null) => Promise<void>;
+  /** Holds off idle sleep while scheduled turns are pending. */
+  setKeepAwake?: (keepAwake: boolean) => Promise<void>;
   /**
    * The OS locale as a BCP-47 tag, which the renderer cannot read for itself:
    * the packaged app ships only the `en-US` Chromium locale pak, so
